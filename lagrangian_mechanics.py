@@ -171,12 +171,71 @@ def main():
     M = sp.simplify(M)                    
     M = substitute_angles(M)
     progress_bar.update(1)
-    progress_bar.update(1)
-    progress_bar.close()
     print("\nMass matrix M(q):")
     sp.pprint(M, use_unicode=True)
 
+    progress_bar.set_description("Computing Coriolis forces")
+    # Coriolis forces
+    C = sp.Matrix(3, 3, lambda i, j: sum(
+        sp.Rational(1, 2) * (sp.diff(M[i, j], theta_vec[k]) + sp.diff(M[i, k], theta_vec[j]) - sp.diff(M[j, k], theta_vec[i])) * theta_dot_vec[k]
+        for k in range(3)
+    ))
+    C = sp.simplify(C)
+    progress_bar.update(1)
+    print("\nCoriolis matrix C(q, q_dot):")
+    sp.pprint(C, use_unicode=True)
 
+    progress_bar.close()
+
+    # ---- Export M and C as callable Python functions to a text file ----
+    print("\nExporting M and C as Python functions to 'dynamics_functions.py'...")
+
+    # Plain (non-time-dependent) symbols used in the output
+    th1, th2, th3 = sp.symbols('theta1 theta2 theta3', real=True)
+    th1d, th2d, th3d = sp.symbols('theta1_dot theta2_dot theta3_dot', real=True)
+
+    # Step 1: expand combined-angle shorthands back to their components
+    combined_angle_subs = {
+        θ1_3: θ1 + θ2 + θ3,
+        θ1_2: θ1 + θ2,
+        θ2_3: θ2 + θ3,
+    }
+    combined_dot_subs = {
+        θ1_3_dot: θ1_dot + θ2_dot + θ3_dot,
+        θ1_2_dot: θ1_dot + θ2_dot,
+        θ2_3_dot: θ2_dot + θ3_dot,
+    }
+
+    M_out = M.subs(combined_angle_subs)
+    C_out = C.subs({**combined_angle_subs, **combined_dot_subs})
+
+    # Step 2: replace time-dependent sympy functions with plain symbols
+    func_subs = {θ1: th1, θ2: th2, θ3: th3,
+                 θ1_dot: th1d, θ2_dot: th2d, θ3_dot: th3d}
+    M_out = M_out.subs(func_subs)
+    C_out = C_out.subs(func_subs)
+
+    output_file = "dynamics_functions_temp.py"
+    with open(output_file, "w") as f:
+        f.write("from numpy import sin, cos, array\n\n\n")
+
+        # M(theta1, theta2, theta3)
+        f.write("def M(theta1, theta2, theta3):\n")
+        f.write("    return array([\n")
+        for i in range(3):
+            row = [str(M_out[i, j]) for j in range(3)]
+            f.write(f"        [{', '.join(row)}],\n")
+        f.write("    ])\n\n\n")
+
+        # C(theta1, theta2, theta3, theta1_dot, theta2_dot, theta3_dot)
+        f.write("def C(theta1, theta2, theta3, theta1_dot, theta2_dot, theta3_dot):\n")
+        f.write("    return array([\n")
+        for i in range(3):
+            row = [str(C_out[i, j]) for j in range(3)]
+            f.write(f"        [{', '.join(row)}],\n")
+        f.write("    ])\n")
+
+    print(f"Saved to '{output_file}'.")
 
 if __name__ == "__main__":
     main()
