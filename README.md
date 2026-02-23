@@ -1,0 +1,1 @@
+# Fordypningsoppgave_Nsquared
