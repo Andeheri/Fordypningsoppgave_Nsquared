@@ -1,42 +1,33 @@
 
-import sympy as sp
+
 import numpy as np
 
-sp.init_printing(use_unicode=True)
 
-# Define symbolic variables for joint angles and link lengths
-theta_MCP, theta_PIP, theta_DIP = sp.symbols('theta_MCP theta_PIP theta_DIP')
-l_PP, l_IP, l_DP = sp.symbols('l_PP l_IP l_DP')
+R = lambda theta: np.array([[np.cos(theta), -np.sin(theta)],
+                           [np.sin(theta),  np.cos(theta)]])
 
-# Define rotation matrices around the z-axis in 2D
-R = lambda theta: sp.Matrix([[sp.cos(theta), -sp.sin(theta)],
-                             [sp.sin(theta), sp.cos(theta)]])
-# Define translation vectors in 2D
-d = lambda x: sp.Matrix([x, 0])
-# Define general Homogeneous transformation matrix in 2D
-H = lambda R, d: sp.Matrix.vstack(
-    sp.Matrix.hstack(R, R@d),
-    sp.Matrix([[0, 0, 1]])
-)
 
-# Define individual transformation matrices for each joint
-H_i_PP  = H(R(theta_MCP), d(l_PP))
-H_PP_IP = H(R(theta_PIP), d(l_IP))
-H_IP_DP = H(R(theta_DIP), d(l_DP))
+def homogeneous_transform(θ1, θ2, θ3, l1, l2, l3, i: int, should_substitute=True) -> np.ndarray:
+    """
+    Returns the HT for the i-th phalange, located at the end of the i-th phalange.
+    
+    :param i: I'th phalange (1, 2, or 3)
+    :type i: int
 
-# Calculate the overall transformation from the base to the fingertip
-H_i_DP = H_i_PP * H_PP_IP * H_IP_DP
-H_i_DP = sp.simplify(H_i_DP)
-
-# Print results
-
-def print_matrix(name, matrix):
-    print(f"{name}:")
-    sp.pprint(matrix, use_unicode=True)
-    print()
-
-print_matrix("H_i_DP", H_i_DP)
-
-print("H_i_DP (numpy array):")
-H_i_DP_np = np.array(H_i_DP.tolist(), dtype=object)
-print(np.array2string(H_i_DP_np, separator=", "))
+    :param should_substitute: Whether to substitute the total angles and their derivatives
+    :type should_substitute: bool
+    """
+    θ_tot = sum([θ1, θ2, θ3][:i])  # Total angle up to the i-th phalange
+    d = sum(
+        (
+            R(sum([θ1, θ2, θ3][:j]))
+            @ np.array([[[l1, l2, l3][j - 1]], [0]])
+            for j in range(1, i + 1)
+        ),
+        np.zeros((2, 1)),
+    )
+    HT = np.block([
+        [R(θ_tot), d],
+        [np.zeros((1, 2)), 1]
+    ])
+    return HT
