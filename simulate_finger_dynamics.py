@@ -4,20 +4,37 @@ import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 from matplotlib.patches import Arc
 from matplotlib.animation import FuncAnimation
+from scipy.integrate import solve_ivp
+from tqdm import tqdm
 
 """
 ----------------------- Define Constants -----------------------
 """
-m1, m2, m3 = 0.02, 0.15, 0.012  # Masses [kg]
+m1, m2, m3 = 0.02, 0.015, 0.012  # Masses [kg]
 l1, l2, l3 = 0.048, 0.030, 0.024  # Lengths [m]
 r1, r2, r3 = 0.085, 0.085, 0.085  # Radii [m]
 
 k1, k2, k3 = 10.0, 10.0, 10.0  # Spring constants [N*m/rad]
-b1, b2, b3 = 1.0, 1.0, 1.0  # Damping coefficients [N*m*s/rad]
+b1, b2, b3 = 2.0, 2.0, 2.0  # Damping coefficients [N*m*s/rad]
 
-theta1_0, theta2_0, theta3_0 = pi/6, pi/6, pi/12  # Spring rest angles [rad]
+theta1_0, theta2_0, theta3_0 = pi/6, pi/4, pi/12  # Spring rest angles [rad]
 
+# Initial conditions: all angles and velocities zero
+state0 = [0.0, 0.0, 0.0,  # theta1, theta2, theta3
+          0.0, 0.0, 0.0]  # theta1_dot, theta2_dot, theta3_dot
+T = 2.0  # Total simulation time [s]
+simulation_speed = 1.0  # Playback speed multiplier (0.5 = half speed, 1.0 = real-time, etc.)
 
+should_save_animation = True  # Set to True to save the animation as a GIF file
+note = "normal"  # A note to include in the filename for clarity
+save_folder = "figures"
+
+filename_angles    = f"{save_folder}/finger_simulation_angles_{note}.png"  # Filename for the saved angles plot
+filename_animation = f"{save_folder}/finger_simulation_{note}.gif"         # Filename for the saved animation
+
+"""
+----------------------- Simulation and Visualization -----------------------
+"""
 def Tau_K(theta1, theta2, theta3):
     """
     3x1 vector of spring forces.
@@ -79,9 +96,9 @@ def C(theta1, theta2, theta3, theta1_dot, theta2_dot, theta3_dot):
     C : np.ndarray, shape (3, 3)
     """
     return np.array([
-        [l2*(-l1*theta2_dot*(m2 + 2*m3)*sin(theta2) - l3*m3*theta3_dot*sin(theta3))/2, l2*(-l1*theta1_dot*(m2 + 2*m3)*sin(theta2) - l1*theta2_dot*(m2 + 2*m3)*sin(theta2) - l3*m3*theta3_dot*sin(theta3))/2, l2*l3*m3*(-theta1_dot - theta2_dot - theta3_dot)*sin(theta3)/2],
-        [l2*(l1*theta1_dot*(m2 + 2*m3)*sin(theta2) - l3*m3*theta3_dot*sin(theta3))/2, -l2*l3*m3*theta3_dot*sin(theta3)/2, l2*l3*m3*(-theta1_dot - theta2_dot - theta3_dot)*sin(theta3)/2],
-        [l2*l3*m3*(theta1_dot + theta2_dot)*sin(theta3)/2, l2*l3*m3*(theta1_dot + theta2_dot)*sin(theta3)/2, 0],
+        [-l1*theta2_dot*(l2*m2*sin(theta2) + 2*l2*m3*sin(theta2) + l3*m3*sin(theta2 + theta3))/2 - l3*m3*theta3_dot*(l1*sin(theta2 + theta3) + l2*sin(theta3))/2, -l1*theta1_dot*(l2*m2*sin(theta2) + 2*l2*m3*sin(theta2) + l3*m3*sin(theta2 + theta3))/2 - l1*theta2_dot*(l2*m2*sin(theta2) + 2*l2*m3*sin(theta2) + l3*m3*sin(theta2 + theta3))/2 - l3*m3*theta3_dot*(l1*sin(theta2 + theta3) + l2*sin(theta3))/2, l3*m3*(l1*sin(theta2 + theta3) + l2*sin(theta3))*(-theta1_dot - theta2_dot - theta3_dot)/2],
+        [l1*theta1_dot*(l2*m2*sin(theta2) + 2*l2*m3*sin(theta2) + l3*m3*sin(theta2 + theta3))/2 - l2*l3*m3*theta3_dot*sin(theta3)/2, -l2*l3*m3*theta3_dot*sin(theta3)/2, l2*l3*m3*(-theta1_dot - theta2_dot - theta3_dot)*sin(theta3)/2],
+        [l3*m3*(l2*theta2_dot*sin(theta3) + theta1_dot*(l1*sin(theta2 + theta3) + l2*sin(theta3)))/2, l2*l3*m3*(theta1_dot + theta2_dot)*sin(theta3)/2, 0],
     ])
 
 
@@ -102,9 +119,9 @@ def M(theta1, theta2, theta3):
     M : np.ndarray, shape (3, 3)
     """
     return np.array([
-        [7*l1**2*m1/12 + l1**2*m2 + l1**2*m3 + l1*l2*m2*cos(theta2) + 2*l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3) + l2**2*m2/4 + l2**2*m3 + l2*l3*m3*cos(theta3) + l3**2*m3/4 + m1*r1**2/4, l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + l2**2*m2/4 + l2**2*m3 + l2*l3*m3*cos(theta3) + l3**2*m3/4, l3*m3*(2*l1*cos(theta2 + theta3) + 2*l2*cos(theta3) + l3)/4],
-        [l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + l2**2*m2/4 + l2**2*m3 + l2*l3*m3*cos(theta3) + l3**2*m3/4, 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + l3**2*m3/4 + m2*r2**2/4, l3*m3*(2*l2*cos(theta3) + l3)/4],
-        [l3*m3*(2*l1*cos(theta2 + theta3) + 2*l2*cos(theta3) + l3)/4, l3*m3*(2*l2*cos(theta3) + l3)/4, m3*(7*l3**2 + 3*r3**2)/12],
+        [7*l1**2*m1/12 + l1**2*m2 + l1**2*m3 + l1*l2*m2*cos(theta2) + 2*l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3) + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m1*r1**2/4 + m2*r2**2/4 + m3*r3**2/4, l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, m3*(6*l1*l3*cos(theta2 + theta3) + 6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12],
+        [l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, m3*(6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12],
+        [m3*(6*l1*l3*cos(theta2 + theta3) + 6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12, m3*(6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12, m3*(7*l3**2 + 3*r3**2)/12],
     ])
 
 
@@ -128,16 +145,19 @@ def dynamics(t, state):
     return [th1d, th2d, th3d, q_ddot[0], q_ddot[1], q_ddot[2]]
 
 
-def visualize_simulation(sol, speed=1.0):
+def visualize_simulation(sol, speed=1.0, save_fps=None):
     """
     Animate the simulated finger motion using the same graphical style as the
     visualization scripts.
 
     Parameters
     ----------
-    sol   : ODE solution from solve_ivp
-    speed : playback speed multiplier (default 1.0 = real-time)
+    sol      : ODE solution from solve_ivp
+    speed    : playback speed multiplier (default 1.0 = real-time)
+    save_fps : if set, use frame-based timing (required for saving to file);
+               caller is responsible for calling plt.show() afterwards.
     """
+    save_mode = save_fps is not None
     # ---- Visual style (mirrors visualization_finger_interactive.py) ----
     link_color       = "#24c6c2"
     outline_color    = "#0f6f6d"
@@ -259,12 +279,17 @@ def visualize_simulation(sol, speed=1.0):
         import time as _time
         nonlocal arc_mcp, arc_pip, arc_dip
 
-        # Wall-clock driven: find which simulation index matches elapsed real time
-        if update.t_start is None:
-            update.t_start = _time.perf_counter()
-        elapsed = (_time.perf_counter() - update.t_start) * speed
+        if save_mode:
+            # Frame-based timing: each frame advances by 1/save_fps seconds of real time
+            sim_t = min(frame / save_fps * speed, sol.t[-1])
+        else:
+            # Wall-clock driven: find which simulation index matches elapsed real time
+            if update.t_start is None:
+                update.t_start = _time.perf_counter()
+            elapsed = (_time.perf_counter() - update.t_start) * speed
+            sim_t = min(elapsed, sol.t[-1])
+
         # Clamp to the last frame once the simulation is done
-        sim_t = min(elapsed, sol.t[-1])
         frame = int(np.searchsorted(sol.t, sim_t))
         frame = min(frame, sol.y.shape[1] - 1)
 
@@ -332,34 +357,38 @@ def visualize_simulation(sol, speed=1.0):
                 ray_mcp, ray_pip, time_text, ann_mcp, ann_pip, ann_dip,
                 *joint_scatters)
 
-    update.t_start = None  # will be set on first call
+    update.t_start = None  # will be set on first call (display mode only)
 
-    # Fire at ~50 fps; each call uses wall time to pick the right frame,
-    # so actual playback speed matches real time regardless of render cost.
-    # n_frames is set large enough that the animation covers the full duration
-    # even on a slow machine.
-    interval = 20  # ms (~50 fps target)
-    n_ticks  = int(sol.t[-1] * 1000 / interval * (1 / speed)) + 50
+    if save_mode:
+        # Exact number of frames needed to cover the full simulation at save_fps
+        interval = int(1000 / save_fps)
+        n_ticks  = int(np.ceil(sol.t[-1] * save_fps / speed)) + 1
+    else:
+        # Fire at ~50 fps; each call uses wall time to pick the right frame,
+        # so actual playback speed matches real time regardless of render cost.
+        # n_frames is set large enough that the animation covers the full duration
+        # even on a slow machine.
+        interval = 20  # ms (~50 fps target)
+        n_ticks  = int(sol.t[-1] * 1000 / interval * (1 / speed)) + 50
 
     anim = FuncAnimation(fig, update, frames=n_ticks,
-                         interval=interval, blit=False, repeat=False)
+                         interval=interval, blit=False, repeat=not save_mode)
     plt.tight_layout()
-    plt.show()
     return anim
 
 
 def main():
-    from scipy.integrate import solve_ivp
+    t_eval = np.linspace(0, T, 2000)
 
-    # Initial conditions: all angles and velocities zero
-    state0 = [0.0, 0.0, 0.0,  # theta1, theta2, theta3
-              0.0, 0.0, 0.0]  # theta1_dot, theta2_dot, theta3_dot
+    last_t = [0.0]
+    with tqdm(total=T, desc="Simulating", unit="s", unit_scale=True) as pbar:
+        def dynamics_with_progress(t, state):
+            pbar.update(t - last_t[0])
+            last_t[0] = t
+            return dynamics(t, state)
 
-    t_span = (0, 1)
-    t_eval = np.linspace(*t_span, 2000)
-
-    sol = solve_ivp(dynamics, t_span, state0, t_eval=t_eval, method='RK45',
-                    rtol=1e-8, atol=1e-10)
+        sol = solve_ivp(dynamics_with_progress, (0, T), state0, t_eval=t_eval, method='RK45',
+                        rtol=1e-8, atol=1e-10)
 
     th1 = sol.y[0]
     th2 = sol.y[1]
@@ -383,10 +412,20 @@ def main():
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.show()
+    if should_save_animation:
+        plt.savefig(filename_angles, dpi=300)  # Save the plot as a PNG file
+    plt.show(block=False)
 
     # ---- Finger animation ----
     anim = visualize_simulation(sol, speed=1.0)
+
+    if should_save_animation:
+        print(f"Saving animation to {filename_animation} ...")
+        anim_save = visualize_simulation(sol, speed=simulation_speed, save_fps=30)
+        anim_save.save(filename_animation, writer='pillow', fps=30, dpi=150)
+        plt.close(anim_save._fig)
+        print("Animation saved.")
+
     plt.show()
 
 

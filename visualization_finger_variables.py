@@ -17,9 +17,9 @@ theta_PIP = np.pi / 4  # 45 degrees
 theta_DIP = np.pi / 3  # 60 degrees
 
 # Link lengths (mm)
-l_PP = 45.0  # Proximal phalanx length
+l_PP = 48.0  # Proximal phalanx length
 l_IP = 30.0  # Intermediate phalanx length
-l_DP = 20.0  # Distal phalanx length
+l_DP = 24.0  # Distal phalanx length
 wrist_length = 15.0  # Wrist extension backward
 
 # Colors
@@ -75,7 +75,7 @@ show_length_end_ticks = False
 
 # Plot limits
 xlim = (-15, 60)
-ylim = (-5, 70)
+ylim = (-10, 80)
 # ===== END CONFIGURATION =====
 
 # Visualization

@@ -161,7 +161,7 @@ def main():
     progress_bar.update(1)
     progress_bar.set_description("Computing kinetic energy")
     # Kinetic energy
-    T = (sp.Rational(1, 2) * (theta_dot_vec.T * J * theta_dot_vec + r_CM_dot_vec.T * M6 * r_CM_dot_vec))[0]
+    T = sp.Rational(1, 2) * (J1 * θ1_dot**2 + J2 * (θ1_dot + θ2_dot)**2 + J3 * (θ1_dot + θ2_dot + θ3_dot)**2 + (r_CM_dot_vec.T * M6 * r_CM_dot_vec)[0, 0])
     # Unpack kinetic energy
     T = sp.simplify(T)
     progress_bar.update(1)
@@ -169,7 +169,7 @@ def main():
 
     M = sp.hessian(T, theta_dot_vec)   
     M = sp.simplify(M)                    
-    M = substitute_angles(M)
+    # M = substitute_angles(M)
     progress_bar.update(1)
     print("\nMass matrix M(q):")
     sp.pprint(M, use_unicode=True)
