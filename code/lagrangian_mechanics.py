@@ -144,9 +144,10 @@ def main():
     progress_bar = tqdm(total=4, desc="Calculating velocities of links")
     should_substitute = True
 
-    J1 = inertia_cylinder(m1, r1, l1)
-    J2 = inertia_cylinder(m2, r2, l2)
-    J3 = inertia_cylinder(m3, r3, l3)
+    # J1 = inertia_cylinder(m1, r1, l1)
+    # J2 = inertia_cylinder(m2, r2, l2)
+    # J3 = inertia_cylinder(m3, r3, l3)
+    J1, J2, J3 = sp.symbols('J1 J2 J3', positive=True, real=True)
 
     r_CM_1_dot = r_CM_dot(1, should_substitute=False)
     r_CM_2_dot = r_CM_dot(2, should_substitute=False)

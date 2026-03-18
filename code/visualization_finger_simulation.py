@@ -30,20 +30,21 @@ def plot_simulation_angles(t, th1, th2, th3, theta1_0, theta2_0, theta3_0, filep
     plt.show(block=False)
 
 
-def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None, force_magnitude=None, force_target=None):
+def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
+                              link_force_s=None, link_force_mag=None, link_force_alpha=None):
     """
-    Animate the simulated finger motion using the same graphical style as the
-    visualization scripts.
+    Animate the simulated finger motion.
 
     Parameters
     ----------
     sol              : ODE solution from solve_ivp
     speed            : playback speed multiplier (default 1.0 = real-time)
-    save_fps         : if set, use frame-based timing (required for saving to file);
-                       caller is responsible for calling plt.show() afterwards.
-    force_magnitude  : if set, draw a red arrow at the fingertip pointing toward
-                       `force_target`, scaled visually.
-    force_target     : 2-element array-like, target point in metres [m] (default (0, 0)).
+    save_fps         : if set, use frame-based timing (required for saving to file).
+    link_force_s     : tuple (s1, s2, s3) – attachment distances [m] from each
+                       link’s proximal joint;  0 ≤ s_i ≤ l_i.
+    link_force_mag   : tuple of three callables  F_i(t) -> float [N], one per link.
+    link_force_alpha : tuple of three callables  alpha_i(t) -> float [rad], one per link.
+                       0 = along link axis (proximal→distal),  pi/2 = 90° CCW from axis.
     """
     save_mode = save_fps is not None
     # ---- Visual style (mirrors visualization_finger_interactive.py) ----
@@ -159,36 +160,58 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None, force_m
     time_text = ax.text(0.02, 0.96, "", transform=ax.transAxes,
                         fontsize=11, va="top")
 
-    # ---- Force arrow setup ----
-    force_arrow_len = 0.45 * L1  # fixed visual length in mm
-    force_arrow_patch = [None]   # mutable container so the nested update() can rebind
+    # ---- Link force visual setup ----
+    _lf_colors = ["crimson", "darkorange", "mediumvioletred"]
+    _lf_labels = [r"$F_1$ (link 1)", r"$F_2$ (link 2)", r"$F_3$ (link 3)"]
+    _lf_arrow_len = 0.45 * L1   # fixed visual arrow length [mm]
+    link_arrow_patches = [None, None, None]   # redrawn every frame
+    lf_att_scatters    = []                   # small diamonds at attachment points
 
-    # Convert target from metres to mm for display
-    _ft = np.zeros(2) if force_target is None else np.asarray(force_target, dtype=float)
-    force_target_mm = _ft * 1000.0
+    def _att_points_mm(a1, a2, a3):
+        """Return the three force attachment points in mm."""
+        MCP_loc = base + L1 * np.array([cos(a1), sin(a1)])
+        PIP_loc = MCP_loc + L2 * np.array([cos(a2), sin(a2)])
+        att1 = base    + link_force_s[0] * 1000.0 * np.array([cos(a1), sin(a1)])
+        att2 = MCP_loc + link_force_s[1] * 1000.0 * np.array([cos(a2), sin(a2)])
+        att3 = PIP_loc + link_force_s[2] * 1000.0 * np.array([cos(a3), sin(a3)])
+        return att1, att2, att3
 
-    def _make_force_arrow(tip_mm):
-        """Create a FancyArrow from `tip_mm` pointing toward force_target_mm."""
-        delta = force_target_mm - tip_mm
-        delta_norm = np.linalg.norm(delta)
-        if delta_norm < 1e-12:
+    def _make_lf_arrow(att_mm, link_angle, alpha_val, mag_val, color):
+        """Create a FancyArrow for a link force (returns None if mag is ~zero)."""
+        if abs(mag_val) < 1e-12:
             return None
-        direction = delta / delta_norm
-        dx, dy = direction * force_arrow_len
-        hw = force_arrow_len * 0.20
-        hl = force_arrow_len * 0.28
-        return FancyArrow(tip_mm[0], tip_mm[1], dx, dy,
+        force_angle = link_angle + alpha_val
+        dx = _lf_arrow_len * cos(force_angle)
+        dy = _lf_arrow_len * sin(force_angle)
+        hw = _lf_arrow_len * 0.20
+        hl = _lf_arrow_len * 0.28
+        return FancyArrow(att_mm[0], att_mm[1], dx, dy,
                           width=hw * 0.3, head_width=hw, head_length=hl,
-                          color="crimson", alpha=0.85, zorder=6,
+                          color=color, alpha=0.85, zorder=6,
                           length_includes_head=True)
 
-    if force_magnitude is not None:
-        force_arrow_patch[0] = _make_force_arrow(P_DIP)
-        if force_arrow_patch[0] is not None:
-            ax.add_patch(force_arrow_patch[0])
-        ax.plot([], [], color="crimson", lw=2,
-                label=f"F = {force_magnitude:.2g} N → ({_ft[0]:.3g}, {_ft[1]:.3g}) m")
+    if link_force_s is not None:
+        t0 = sol.t[0]
+        atts_i  = _att_points_mm(a1, a2, a3)
+        angles_i = [a1, a2, a3]
+        for idx in range(3):
+            patch = _make_lf_arrow(atts_i[idx], angles_i[idx],
+                                   link_force_alpha[idx](t0), link_force_mag[idx](t0),
+                                   _lf_colors[idx])
+            link_arrow_patches[idx] = patch
+            if patch is not None:
+                ax.add_patch(patch)
+            sc = ax.scatter(*atts_i[idx], s=40, c=_lf_colors[idx], marker='D',
+                            edgecolors='black', linewidths=0.8, zorder=7)
+            lf_att_scatters.append(sc)
+        for color, label in zip(_lf_colors, _lf_labels):
+            ax.plot([], [], color=color, lw=2, label=label)
         ax.legend(loc="upper right", fontsize=10)
+
+    # Live readout of force values (bottom-left corner)
+    force_info_text = ax.text(0.02, 0.02, "", transform=ax.transAxes,
+                              fontsize=8, va="bottom", family="monospace",
+                              bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
 
     def _set_line(line, p0, p1):
         line.set_xdata([p0[0], p1[0]])
@@ -271,18 +294,29 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None, force_m
 
         time_text.set_text(f"t = {sim_t:.2f} s")
 
-        # Update force arrow
-        if force_magnitude is not None:
-            if force_arrow_patch[0] is not None:
-                force_arrow_patch[0].remove()
-            force_arrow_patch[0] = _make_force_arrow(DIP)
-            if force_arrow_patch[0] is not None:
-                ax.add_patch(force_arrow_patch[0])
+        # Update link force arrows, attachment dots, and info text
+        if link_force_s is not None:
+            att1, att2, att3 = _att_points_mm(a1, a2, a3)
+            atts   = [att1, att2, att3]
+            angles = [a1, a2, a3]
+            info_lines = []
+            for idx in range(3):
+                if link_arrow_patches[idx] is not None:
+                    link_arrow_patches[idx].remove()
+                mag_val   = link_force_mag[idx](sim_t)
+                alpha_val = link_force_alpha[idx](sim_t)
+                patch = _make_lf_arrow(atts[idx], angles[idx], alpha_val, mag_val, _lf_colors[idx])
+                link_arrow_patches[idx] = patch
+                if patch is not None:
+                    ax.add_patch(patch)
+                lf_att_scatters[idx].set_offsets([atts[idx]])
+                info_lines.append(f"F{idx+1}={mag_val:6.1f} N   alpha{idx+1}={alpha_val:.3f} rad")
+            force_info_text.set_text("\n".join(info_lines))
 
         return (fill_wrist, fill_pp, fill_ip, fill_dp,
                 rim_wrist, rim_pp, rim_ip, rim_dp,
                 ray_mcp, ray_pip, time_text, ann_mcp, ann_pip, ann_dip,
-                *joint_scatters)
+                force_info_text, *joint_scatters, *lf_att_scatters)
 
     update.t_start = None  # will be set on first call (display mode only)
 

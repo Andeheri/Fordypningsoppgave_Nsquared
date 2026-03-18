@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
 from visualization_finger_simulation import animate_finger_simulation, plot_simulation_angles
-from homogeneous_transformations import homogeneous_transform
 
 """
 ----------------------- Define Constants -----------------------
@@ -12,15 +11,34 @@ from homogeneous_transformations import homogeneous_transform
 m1, m2, m3 = 0.02, 0.015, 20  # Masses [kg]
 l1, l2, l3 = 0.048, 0.030, 0.024  # Lengths [m]
 r1, r2, r3 = 0.085, 0.085, 0.085  # Radii [m]
-
+N_max = 22 # Maybe 30
+cable_speed = 67  # mm/s
 k1, k2, k3 = 10.0, 10.0, 10.0  # Spring constants [N*m/rad]
 b1, b2, b3 = 2.0, 2.0, 2.0  # Damping coefficients [N*m*s/rad]
 
 theta1_0, theta2_0, theta3_0 = pi/6, pi/4, pi/12  # Spring rest angles [rad]
 
-should_apply_external_force = True  # Set to True to apply external force
-F_ext_magnitude = 250.0  # Magnitude of external force applied at the fingertip [N]
-F_ext_target = np.array([1.0, 0.0])  # Target point the force pulls toward [m]
+# ---- Three link forces ----------------------------------------
+# Attachment positions: distance from the proximal joint of each link [m]
+# Allowed ranges:  0 <= force_s1 <= l1,  0 <= force_s2 <= l2,  0 <= force_s3 <= l3
+force_s1 = l1 * 0.5   # link 1 – applied at midpoint
+force_s2 = l2 * 0.5   # link 2 – applied at midpoint
+force_s3 = l3 * 0.5   # link 3 – applied at midpoint
+
+# Force magnitude at each timestep [N] — callables  F(t) -> float.
+# Set  lambda t: 0.0  to disable a force.
+F_link1 = lambda t: 50.0
+F_link2 = lambda t: 50.0
+F_link3 = lambda t: 50.0
+
+# Relative force angle at each timestep [rad] — callables  alpha(t) -> float.
+#   alpha = 0      → force is directed along the link axis (proximal → distal)
+#   alpha = pi/2   → force is 90° counter-clockwise from the link axis
+alpha_link1 = lambda t: pi / 2
+alpha_link2 = lambda t: pi / 2
+alpha_link3 = lambda t: pi / 2
+
+should_apply_link_forces = True
 
 # Initial conditions: all angles and velocities zero
 state0 = [0.0, 0.0, 0.0,  # theta1, theta2, theta3
@@ -128,52 +146,89 @@ def M(theta1, theta2, theta3):
     ])
 
 
-def external_force(theta1, theta2, theta3, u, target=None):
+def tau_link_forces(theta1, theta2, theta3, t):
     """
-    Computes the 3x1 vector of generalized torques due to an external force of
-    magnitude u applied at the fingertip (origin of HT i=3), directed toward
-    `target` (default: global origin).
+    Generalized torques from three link forces, via the virtual-work principle.
 
-    Uses the virtual-work principle: tau_ext = J^T @ F, where J is the 2x3
-    positional Jacobian of the tip and F = u * (target - p) / ||target - p||.
+    A separate force acts on each link, applied at a fixed distance along that
+    link (measured from its proximal joint) and directed at a time-varying angle
+    relative to the link's own axis in the global frame:
+
+        alpha = 0      → force is directed along the link axis (proximal → distal)
+        alpha = pi/2   → force is 90° CCW from the link axis
+
+    The world-frame force vector for link i is
+
+        F_i = F_link_i(t) * [cos(a_i + alpha_i(t)),
+                             sin(a_i + alpha_i(t))]
+
+    where the cumulative joint angles are
+
+        a1 = theta1,   a2 = theta1+theta2,   a3 = theta1+theta2+theta3.
+
+    Attachment-point world coordinates
+    -----------------------------------
+        p_att1 = force_s1*[cos(a1), sin(a1)]
+        p_att2 = l1*[cos(a1), sin(a1)]  +  force_s2*[cos(a2), sin(a2)]
+        p_att3 = l1*[cos(a1), sin(a1)]  +  l2*[cos(a2), sin(a2)]  +  force_s3*[cos(a3), sin(a3)]
+
+    Positional Jacobians  J_i  (2x3)  of each attachment point
+    -----------------------------------------------------------
+        J1 = [[ -force_s1*sin(a1),                                0,                       0 ],
+              [  force_s1*cos(a1),                                0,                       0 ]]
+
+        J2 = [[ -l1*sin(a1) - force_s2*sin(a2),  -force_s2*sin(a2),                       0 ],
+              [  l1*cos(a1) + force_s2*cos(a2),   force_s2*cos(a2),                       0 ]]
+
+        J3 = [[ -l1*sin(a1) - l2*sin(a2) - force_s3*sin(a3),  -l2*sin(a2) - force_s3*sin(a3),  -force_s3*sin(a3) ],
+              [  l1*cos(a1) + l2*cos(a2) + force_s3*cos(a3),   l2*cos(a2) + force_s3*cos(a3),   force_s3*cos(a3) ]]
+
+    Generalized torques (virtual-work principle)
+    -------------------------------------------
+        tau_i     = J_i^T @ F_i
+        tau_total = tau_1 + tau_2 + tau_3
 
     Parameters
     ----------
     theta1, theta2, theta3 : joint angles [rad]
-    u                      : force magnitude [N]
-    target                 : 2-element array-like, target point [m] (default (0, 0))
+    t                      : current simulation time [s]
 
     Returns
     -------
-    tau_ext : np.ndarray, shape (3,)
+    tau : np.ndarray, shape (3,)   generalized torques [N*m]
     """
-    if target is None:
-        target = np.zeros(2)
-    target = np.asarray(target, dtype=float)
+    a1 = theta1
+    a2 = theta1 + theta2
+    a3 = theta1 + theta2 + theta3
 
-    # Tip position in global coordinates (translation column of HT for i=3)
-    HT = homogeneous_transform(theta1, theta2, theta3, l1, l2, l3, i=3)
-    p = HT[:2, 2]  # shape (2,)
+    # ---- Link 1 force ----
+    # Attachment: p_att1 = force_s1 * [cos(a1), sin(a1)]
+    J1 = np.array([
+        [-force_s1 * sin(a1),  0.0,  0.0],
+        [ force_s1 * cos(a1),  0.0,  0.0],
+    ])
+    F1 = F_link1(t) * np.array([cos(a1 + alpha_link1(t)), sin(a1 + alpha_link1(t))])
+    tau1 = J1.T @ F1
 
-    # Force vector directed from tip toward target
-    delta = target - p
-    delta_norm = np.linalg.norm(delta)
-    if delta_norm < 1e-12:
-        return np.zeros(3)
-    F = u * (delta / delta_norm)  # shape (2,)
+    # ---- Link 2 force ----
+    # Attachment: p_att2 = l1*[cos(a1), sin(a1)] + force_s2*[cos(a2), sin(a2)]
+    J2 = np.array([
+        [-l1*sin(a1) - force_s2*sin(a2),  -force_s2*sin(a2),  0.0],
+        [ l1*cos(a1) + force_s2*cos(a2),   force_s2*cos(a2),  0.0],
+    ])
+    F2 = F_link2(t) * np.array([cos(a2 + alpha_link2(t)), sin(a2 + alpha_link2(t))])
+    tau2 = J2.T @ F2
 
-    # 2x3 positional Jacobian of the tip
-    # p = R(t1)*[l1,0] + R(t1+t2)*[l2,0] + R(t1+t2+t3)*[l3,0]
-    # dp/dti has columns: partial derivatives with respect to each cumulative angle
-    t1  = theta1
-    t12 = theta1 + theta2
-    t123 = theta1 + theta2 + theta3
-    J = np.array([
-        [-l1*sin(t1) - l2*sin(t12) - l3*sin(t123),  -l2*sin(t12) - l3*sin(t123),  -l3*sin(t123)],
-        [ l1*cos(t1) + l2*cos(t12) + l3*cos(t123),   l2*cos(t12) + l3*cos(t123),   l3*cos(t123)],
-    ])  # shape (2, 3)
+    # ---- Link 3 force ----
+    # Attachment: p_att3 = l1*[cos(a1),sin(a1)] + l2*[cos(a2),sin(a2)] + force_s3*[cos(a3),sin(a3)]
+    J3 = np.array([
+        [-l1*sin(a1) - l2*sin(a2) - force_s3*sin(a3),  -l2*sin(a2) - force_s3*sin(a3),  -force_s3*sin(a3)],
+        [ l1*cos(a1) + l2*cos(a2) + force_s3*cos(a3),   l2*cos(a2) + force_s3*cos(a3),   force_s3*cos(a3)],
+    ])
+    F3 = F_link3(t) * np.array([cos(a3 + alpha_link3(t)), sin(a3 + alpha_link3(t))])
+    tau3 = J3.T @ F3
 
-    return J.T @ F  # shape (3,)
+    return tau1 + tau2 + tau3
 
 
 
@@ -190,7 +245,7 @@ def dynamics(t, state):
     C_mat = C(th1, th2, th3, th1d, th2d, th3d)
     tau_k = Tau_K(th1, th2, th3)
     tau_b = Tau_B(th1d, th2d, th3d)
-    tau_ext = external_force(th1, th2, th3, F_ext_magnitude, F_ext_target) if should_apply_external_force else np.zeros(3)
+    tau_ext = tau_link_forces(th1, th2, th3, t) if should_apply_link_forces else np.zeros(3)
 
     rhs = -C_mat @ q_dot - tau_k - tau_b + tau_ext
     q_ddot = np.linalg.solve(M_mat, rhs)
@@ -214,13 +269,16 @@ def main():
     plot_simulation_angles(sol.t, th1, th2, th3, theta1_0, theta2_0, theta3_0, filename_angles, should_save_animation)
     
     # ---- Finger animation ----
-    _fmag    = F_ext_magnitude if should_apply_external_force else None
-    _ftarget = F_ext_target    if should_apply_external_force else None
-    _ = animate_finger_simulation(sol, l1, l2, l3, speed=simulation_speed, force_magnitude=_fmag, force_target=_ftarget)
+    _lf_s     = (force_s1, force_s2, force_s3)          if should_apply_link_forces else None
+    _lf_mag   = (F_link1, F_link2, F_link3)              if should_apply_link_forces else None
+    _lf_alpha = (alpha_link1, alpha_link2, alpha_link3)  if should_apply_link_forces else None
+    _ = animate_finger_simulation(sol, l1, l2, l3, speed=simulation_speed,
+                                  link_force_s=_lf_s, link_force_mag=_lf_mag, link_force_alpha=_lf_alpha)
 
     if should_save_animation:
         print(f"Saving animation to {filename_animation} ...")
-        anim_save = animate_finger_simulation(sol, l1, l2, l3, speed=simulation_speed, save_fps=30, force_magnitude=_fmag, force_target=_ftarget)
+        anim_save = animate_finger_simulation(sol, l1, l2, l3, speed=simulation_speed, save_fps=30,
+                                              link_force_s=_lf_s, link_force_mag=_lf_mag, link_force_alpha=_lf_alpha)
         anim_save.save(filename_animation, writer='pillow', fps=30, dpi=150)
         plt.close(anim_save._fig)
         print("Animation saved.")

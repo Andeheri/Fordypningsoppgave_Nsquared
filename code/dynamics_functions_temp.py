@@ -3,9 +3,9 @@ from numpy import sin, cos, array
 
 def M(theta1, theta2, theta3):
     return array([
-        [7*l1**2*m1/12 + l1**2*m2 + l1**2*m3 + l1*l2*m2*cos(theta2) + 2*l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3) + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m1*r1**2/4 + m2*r2**2/4 + m3*r3**2/4, l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, m3*(6*l1*l3*cos(theta2 + theta3) + 6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12],
-        [l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, m3*(6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12],
-        [m3*(6*l1*l3*cos(theta2 + theta3) + 6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12, m3*(6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12, m3*(7*l3**2 + 3*r3**2)/12],
+        [J1 + J2 + J3 + l1**2*m1/4 + l1**2*m2 + l1**2*m3 + l1*l2*m2*cos(theta2) + 2*l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3) + l2**2*m2/4 + l2**2*m3 + l2*l3*m3*cos(theta3) + l3**2*m3/4, J2 + J3 + l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + l2**2*m2/4 + l2**2*m3 + l2*l3*m3*cos(theta3) + l3**2*m3/4, J3 + l1*l3*m3*cos(theta2 + theta3)/2 + l2*l3*m3*cos(theta3)/2 + l3**2*m3/4],
+        [J2 + J3 + l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + l2**2*m2/4 + l2**2*m3 + l2*l3*m3*cos(theta3) + l3**2*m3/4, J2 + J3 + l2**2*m2/4 + l2**2*m3 + l2*l3*m3*cos(theta3) + l3**2*m3/4, J3 + l2*l3*m3*cos(theta3)/2 + l3**2*m3/4],
+        [J3 + l1*l3*m3*cos(theta2 + theta3)/2 + l2*l3*m3*cos(theta3)/2 + l3**2*m3/4, J3 + l2*l3*m3*cos(theta3)/2 + l3**2*m3/4, J3 + l3**2*m3/4],
     ])
 
 
