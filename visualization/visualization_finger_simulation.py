@@ -5,6 +5,7 @@ import matplotlib.patheffects as pe
 from matplotlib.patches import Arc, FancyArrow
 import numpy as np
 from numpy import sin, cos
+import os
 
 
 def plot_simulation_angles(t, th1, th2, th3, theta1_0, theta2_0, theta3_0, filepath, should_save):
@@ -26,6 +27,7 @@ def plot_simulation_angles(t, th1, th2, th3, theta1_0, theta2_0, theta3_0, filep
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     if should_save:
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
         plt.savefig(filepath, dpi=300)  # Save the plot as a PNG file
     plt.show(block=False)
 

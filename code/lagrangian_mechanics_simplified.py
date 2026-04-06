@@ -1,6 +1,7 @@
 
 import sympy as sp
 import time
+import dill
 from tqdm import tqdm
 
 """-------------------- Symbols -----------------------"""
@@ -311,6 +312,13 @@ def main():
     progress_bar.update(1)
     print("\nCoriolis matrix C(q, q_dot):")
     dot_pprint(C)
+
+    # Save M, C and p-values to a pickle file
+    p_defs = [(ps._seen[str(expr)], expr) for expr in ps._const_exprs]
+    pickle_data = {'M': M, 'C': C, 'p_defs': p_defs}
+    with open('dynamics_results.pkl', 'wb') as f:
+        dill.dump(pickle_data, f)
+    print("\nSaved M, C and p-values to 'dynamics_results.pkl'.")
 
     progress_bar.close()
     return

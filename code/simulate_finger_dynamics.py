@@ -1,9 +1,13 @@
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import numpy as np
 from numpy import sin, cos, pi
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
-from visualization_finger_simulation import animate_finger_simulation, plot_simulation_angles
+from visualization.visualization_finger_simulation import animate_finger_simulation, plot_simulation_angles
 
 """
 ----------------------- Define Constants -----------------------
@@ -27,15 +31,15 @@ force_s3 = l3 * 0.5   # link 3 – applied at midpoint
 
 # Force magnitude at each timestep [N] — callables  F(t) -> float.
 # Set  lambda t: 0.0  to disable a force.
-F_link1 = lambda t: 50.0
-F_link2 = lambda t: 50.0
-F_link3 = lambda t: 50.0
+F_link1 = lambda t: 25.0
+F_link2 = lambda t: 25.0
+F_link3 = lambda t: 25.0
 
 # Relative force angle at each timestep [rad] — callables  alpha(t) -> float.
 #   alpha = 0      → force is directed along the link axis (proximal → distal)
 #   alpha = pi/2   → force is 90° counter-clockwise from the link axis
-alpha_link1 = lambda t: pi / 2
-alpha_link2 = lambda t: pi / 2
+alpha_link1 = lambda t: pi/4
+alpha_link2 = lambda t: pi/2
 alpha_link3 = lambda t: pi / 2
 
 should_apply_link_forces = True
