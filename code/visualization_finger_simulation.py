@@ -1,12 +1,11 @@
 
 from matplotlib import pyplot as plt
-from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.animation import FuncAnimation
 import matplotlib.patheffects as pe
-from matplotlib.patches import Arc
+from matplotlib.patches import Arc, FancyArrow
 import numpy as np
 from numpy import sin, cos
 import os
-from tqdm import tqdm
 
 
 def plot_simulation_angles(t, th1, th2, th3, theta1_0, theta2_0, theta3_0, filepath, should_save):
@@ -34,18 +33,20 @@ def plot_simulation_angles(t, th1, th2, th3, theta1_0, theta2_0, theta3_0, filep
 
 
 def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
-                              filepath=None, should_save=False, should_show=True):
+                              link_force_s=None, link_force_mag=None, link_force_alpha=None):
     """
     Animate the simulated finger motion.
 
     Parameters
     ----------
-    sol          : ODE solution from solve_ivp
-    speed        : playback speed multiplier (default 1.0 = real-time)
-    save_fps     : if set, use frame-based timing (required for saving to file).
-    filepath     : path to save the animation (e.g. 'output/anim.mp4').
-    should_save  : if True, save the animation to filepath before showing.
-    should_show  : if True, display the animation window.
+    sol              : ODE solution from solve_ivp
+    speed            : playback speed multiplier (default 1.0 = real-time)
+    save_fps         : if set, use frame-based timing (required for saving to file).
+    link_force_s     : tuple (s1, s2, s3) – attachment distances [m] from each
+                       link’s proximal joint;  0 ≤ s_i ≤ l_i.
+    link_force_mag   : tuple of three callables  F_i(t) -> float [N], one per link.
+    link_force_alpha : tuple of three callables  alpha_i(t) -> float [rad], one per link.
+                       0 = along link axis (proximal→distal),  pi/2 = 90° CCW from axis.
     """
     save_mode = save_fps is not None
     # ---- Visual style (mirrors visualization_finger_interactive.py) ----
@@ -161,23 +162,78 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
     time_text = ax.text(0.02, 0.96, "", transform=ax.transAxes,
                         fontsize=11, va="top")
 
-    # ---- Timing setup (must be before update is called) ----
-    if save_mode:
-        interval = int(1000 / save_fps)
-        n_ticks  = int(np.ceil(sol.t[-1] * save_fps / speed)) + 1
-    else:
-        display_fps = 30
-        interval    = int(1000 / display_fps)
-        n_ticks     = int(np.ceil(sol.t[-1] * display_fps / speed)) + 1
+    # ---- Link force visual setup ----
+    _lf_colors = ["crimson", "darkorange", "mediumvioletred"]
+    _lf_labels = [r"$F_1$ (link 1)", r"$F_2$ (link 2)", r"$F_3$ (link 3)"]
+    _lf_arrow_len = 0.45 * L1   # fixed visual arrow length [mm]
+    link_arrow_patches = [None, None, None]   # redrawn every frame
+    lf_att_scatters    = []                   # small diamonds at attachment points
+
+    def _att_points_mm(a1, a2, a3):
+        """Return the three force attachment points in mm."""
+        MCP_loc = base + L1 * np.array([cos(a1), sin(a1)])
+        PIP_loc = MCP_loc + L2 * np.array([cos(a2), sin(a2)])
+        att1 = base    + link_force_s[0] * 1000.0 * np.array([cos(a1), sin(a1)])
+        att2 = MCP_loc + link_force_s[1] * 1000.0 * np.array([cos(a2), sin(a2)])
+        att3 = PIP_loc + link_force_s[2] * 1000.0 * np.array([cos(a3), sin(a3)])
+        return att1, att2, att3
+
+    def _make_lf_arrow(att_mm, link_angle, alpha_val, mag_val, color):
+        """Create a FancyArrow for a link force (returns None if mag is ~zero)."""
+        if abs(mag_val) < 1e-12:
+            return None
+        force_angle = link_angle + alpha_val
+        dx = _lf_arrow_len * cos(force_angle)
+        dy = _lf_arrow_len * sin(force_angle)
+        hw = _lf_arrow_len * 0.20
+        hl = _lf_arrow_len * 0.28
+        return FancyArrow(att_mm[0], att_mm[1], dx, dy,
+                          width=hw * 0.3, head_width=hw, head_length=hl,
+                          color=color, alpha=0.85, zorder=6,
+                          length_includes_head=True)
+
+    if link_force_s is not None:
+        t0 = sol.t[0]
+        atts_i  = _att_points_mm(a1, a2, a3)
+        angles_i = [a1, a2, a3]
+        for idx in range(3):
+            patch = _make_lf_arrow(atts_i[idx], angles_i[idx],
+                                   link_force_alpha[idx](t0), link_force_mag[idx](t0),
+                                   _lf_colors[idx])
+            link_arrow_patches[idx] = patch
+            if patch is not None:
+                ax.add_patch(patch)
+            sc = ax.scatter(*atts_i[idx], s=40, c=_lf_colors[idx], marker='D',
+                            edgecolors='black', linewidths=0.8, zorder=7)
+            lf_att_scatters.append(sc)
+        for color, label in zip(_lf_colors, _lf_labels):
+            ax.plot([], [], color=color, lw=2, label=label)
+        ax.legend(loc="upper right", fontsize=10)
+
+    # Live readout of force values (bottom-left corner)
+    force_info_text = ax.text(0.02, 0.02, "", transform=ax.transAxes,
+                              fontsize=8, va="bottom", family="monospace",
+                              bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
 
     def _set_line(line, p0, p1):
         line.set_xdata([p0[0], p1[0]])
         line.set_ydata([p0[1], p1[1]])
 
     def update(frame):
+        import time as _time
         nonlocal arc_mcp, arc_pip, arc_dip
 
-        sim_t = min(frame * (interval / 1000.0) * speed, sol.t[-1])
+        if save_mode:
+            # Frame-based timing: each frame advances by 1/save_fps seconds of real time
+            sim_t = min(frame / save_fps * speed, sol.t[-1])
+        else:
+            # Wall-clock driven: find which simulation index matches elapsed real time
+            if update.t_start is None:
+                update.t_start = _time.perf_counter()
+            elapsed = (_time.perf_counter() - update.t_start) * speed
+            sim_t = min(elapsed, sol.t[-1])
+
+        # Clamp to the last frame once the simulation is done
         frame = int(np.searchsorted(sol.t, sim_t))
         frame = min(frame, sol.y.shape[1] - 1)
 
@@ -240,25 +296,45 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
 
         time_text.set_text(f"t = {sim_t:.2f} s")
 
+        # Update link force arrows, attachment dots, and info text
+        if link_force_s is not None:
+            att1, att2, att3 = _att_points_mm(a1, a2, a3)
+            atts   = [att1, att2, att3]
+            angles = [a1, a2, a3]
+            info_lines = []
+            for idx in range(3):
+                if link_arrow_patches[idx] is not None:
+                    link_arrow_patches[idx].remove()
+                mag_val   = link_force_mag[idx](sim_t)
+                alpha_val = link_force_alpha[idx](sim_t)
+                patch = _make_lf_arrow(atts[idx], angles[idx], alpha_val, mag_val, _lf_colors[idx])
+                link_arrow_patches[idx] = patch
+                if patch is not None:
+                    ax.add_patch(patch)
+                lf_att_scatters[idx].set_offsets([atts[idx]])
+                info_lines.append(f"F{idx+1}={mag_val:6.1f} N   alpha{idx+1}={alpha_val:.3f} rad")
+            force_info_text.set_text("\n".join(info_lines))
+
         return (fill_wrist, fill_pp, fill_ip, fill_dp,
                 rim_wrist, rim_pp, rim_ip, rim_dp,
                 ray_mcp, ray_pip, time_text, ann_mcp, ann_pip, ann_dip,
-                *joint_scatters)
+                force_info_text, *joint_scatters, *lf_att_scatters)
 
-    plt.tight_layout()
+    update.t_start = None  # will be set on first call (display mode only)
+
+    if save_mode:
+        # Exact number of frames needed to cover the full simulation at save_fps
+        interval = int(1000 / save_fps)
+        n_ticks  = int(np.ceil(sol.t[-1] * save_fps / speed)) + 1
+    else:
+        # Fire at ~50 fps; each call uses wall time to pick the right frame,
+        # so actual playback speed matches real time regardless of render cost.
+        # n_frames is set large enough that the animation covers the full duration
+        # even on a slow machine.
+        interval = 20  # ms (~50 fps target)
+        n_ticks  = int(sol.t[-1] * 1000 / interval * (1 / speed)) + 50
+
     anim = FuncAnimation(fig, update, frames=n_ticks,
                          interval=interval, blit=False, repeat=not save_mode)
-
-    if should_save and filepath is not None:
-        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
-        writer = PillowWriter(fps=save_fps or 30)
-        with tqdm(total=n_ticks, desc="Saving animation", unit="frame") as pbar:
-            def _progress(i, n):
-                pbar.n = i + 1
-                pbar.refresh()
-            anim.save(filepath, writer=writer, progress_callback=_progress)
-            pbar.n = n_ticks
-            pbar.refresh()
-
-    if should_show:
-        plt.show()
+    plt.tight_layout()
+    return anim

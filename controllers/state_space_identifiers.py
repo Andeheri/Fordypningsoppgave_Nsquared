@@ -7,21 +7,26 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import numpy as np
+from numpy import sin, cos, pi
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
 from dynamics import *
 from visualization.visualization_finger_simulation import animate_finger_simulation, plot_simulation_angles
 
 
-def u(theta: np.ndarray, theta_dot: np.ndarray) -> np.ndarray:
-    return np.array([0.0, 0.0, 0.0])
+def u(t: float, theta: np.ndarray, theta_dot: np.ndarray) -> np.ndarray:
+    return np.array([1.0, 2.0, 3.0]) * sin(2 * pi * 0.5 * t)  # Example control input, can be replaced with a more complex controller
 
 
 def main():
     # Figure configuration
-    file_path = "figures/controller_performance/state_space_identifiers/without_controller.png"
+    folder_path = "figures/controller_performance/state_space_identifiers"
+    file_name = "without_controller"
+    file_path = os.path.join(folder_path, file_name)
     should_save_figures = True
-    should_animate = False
+    should_animate = True
+    should_show_figures = False
+
     # Simulation parameters
     T = 5.0  # Total simulation time [s]
     N = 2000  # Number of evaluation points
@@ -34,7 +39,7 @@ def main():
     def ode(t, state):
         theta = state[:3]
         theta_dot = state[3:]
-        tau = u(theta, theta_dot)
+        tau = u(t, theta, theta_dot)
         theta_ddot = dynamics(theta, theta_dot, tau)
         return np.concatenate([theta_dot, theta_ddot])
 
@@ -50,7 +55,9 @@ def main():
 
     # Visualization
     θ1, θ2, θ3 = sol.y[0], sol.y[1], sol.y[2]
-    plot_simulation_angles(sol.t, θ1, θ2, θ3, theta1_0, theta2_0, theta3_0, file_path, should_save_figures)
+    plot_simulation_angles(sol.t, θ1, θ2, θ3, theta1_0, theta2_0, theta3_0, file_path + ".png", should_save_figures)
+    if should_animate:
+        animate_finger_simulation(sol, l1, l2, l3, filepath=file_path + ".gif", should_save=should_save_figures, should_show=should_show_figures)
 
 
 if __name__ == "__main__":

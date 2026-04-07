@@ -7,7 +7,7 @@ from numpy import sin, cos, pi
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
-from visualization.visualization_finger_simulation import animate_finger_simulation, plot_simulation_angles
+from visualization_finger_simulation import animate_finger_simulation, plot_simulation_angles
 
 """
 ----------------------- Define Constants -----------------------
