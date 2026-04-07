@@ -3,14 +3,20 @@ import numpy as np
 from numpy import sin, cos, pi
 
 # Parameters for the finger dynamics
-m1, m2, m3 = 0.02, 0.015, 20  # Masses [kg]
+m1, m2, m3 = 0.02, 0.015, 0.010  # Masses [kg]
 l1, l2, l3 = 0.048, 0.030, 0.024  # Lengths [m]
 r1, r2, r3 = 0.085, 0.085, 0.085  # Radii [m]
 
 k1, k2, k3 = 10.0, 10.0, 10.0  # Spring constants [N*m/rad]
 b1, b2, b3 = 2.0, 2.0, 2.0  # Damping coefficients [N*m*s/rad]
 
+Kf = np.diag([k1, k2, k3])  # Spring stiffness matrix
+Bf = np.diag([b1, b2, b3])  # Damping matrix
+O3 = np.zeros((3, 3))
+I3 = np.eye(3)
+
 theta1_0, theta2_0, theta3_0 = pi/6, pi/4, pi/12  # Spring rest angles [rad]
+theta_spring_0 = np.array([theta1_0, theta2_0, theta3_0])  # Spring rest angles [rad]
 
 
 def Tau_K(theta: np.ndarray) -> np.ndarray:
@@ -20,8 +26,6 @@ def Tau_K(theta: np.ndarray) -> np.ndarray:
     Parameters
     ----------
     theta : np.ndarray, shape (3,) Relative joint angles [rad]
-    theta1_0, theta2_0, theta3_0 : spring rest angles [rad]
-    k1, k2, k3   : spring constants [N*m/rad]
 
     Returns
     -------
