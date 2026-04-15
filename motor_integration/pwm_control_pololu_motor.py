@@ -12,7 +12,7 @@ N = 1000  # Number of time steps
 t_eval = np.linspace(0, T, N)
 dt = t_eval[1] - t_eval[0]
 save_folder_path = "motor_integration/figures"
-filename = "pi_pd_pwm_control_results.png"
+filename = "pi_pd_pwm_pololu_control_results.png"
 
 theta_0 = 0.0  # Initial angle (rad)
 omega_0 = 0.0  # Initial angular velocity (rad/s)
@@ -21,18 +21,36 @@ i_a_0 = 0.0    # Initial armature current (A)
 """
 Define motor parameters
 """
-
-Jm = 0.093  # kg*m^2 (Rotor moment of inertia)
-Bm = 0.008  # N*m*s (Rotor friction coefficient)
-Kb = 0.6    # V*s/rad (Back EMF constant)
-Kt = 0.7274 # Nm/A (Torque constant)
-Ra = 0.6    # Ω (Armature resistance)
-La = 0.006  # H (Armature inductance)
-
-V_sat = 12.0   # V (Supply voltage / saturation limit)
+V_supply = 12.0   # V (Supply voltage / saturation limit)
 pwm_frequency = 1000.0  # Hz (PWM frequency)
 pwm_period = 1.0 / pwm_frequency  # s (PWM period)
 voltage_turnoff = 1.0  # Absolute voltage level where the PWM output should switch to zero to avoid excessive switching at low voltages
+
+g = 9.81  # m/s^2 (Gravitational acceleration)
+# Information from datasheet: https://www.pololu.com/file/0J1829/pololu-25d-metal-gearmotors.pdf, page 3
+Ia_stall = 4.9  # A
+tau_stall = 220 * g / 1000 # Nm (Stall torque at 12 V)
+
+Ia_no_load = 0.2  # A (No-load current at 12 V)
+theta_dot_no_load = 130 * 2 * pi / 60  # rad/s (No-load speed at 12 V)
+
+Kt = tau_stall / Ia_stall # Nm/A (Torque constant) ≈ 0.44 Nm/A
+Ra = V_supply / Ia_stall # Ω (Armature resistance) ≈ 2.44 Ω (Measured from stall current at 12 V)
+Bm = Kt * Ia_no_load / theta_dot_no_load  # Nm*s (Rotor friction coefficient)
+Kb = (V_supply - Ra * Ia_no_load) / theta_dot_no_load   # V*s/rad (Back EMF constant)
+
+# Unkowns
+Jm = 0.093  # kg*m^2 (Rotor moment of inertia)
+La = 0.006  # H (Armature inductance)
+
+print("Motor parameters:")
+print(f"  Jm = {Jm} kg*m^2")
+print(f"  Bm = {Bm} Nm*s")
+print(f"  Kb = {Kb} V*s/rad")
+print(f"  Kt = {Kt} Nm/A")
+print(f"  Ra = {Ra:.2f} Ω")
+print(f"  La = {La} H")
+print(Kt * 0.87 / g * 1000)
 
 """
 PI-PD control parameters
@@ -41,18 +59,18 @@ Control law (2-DOF structure):
   V = Kp1*(r - θ) + Ki*∫(r - θ)dt  [PI on error]
     - Kp2*ω - Kd*(Kt*i_a - Bm*ω)/Jm [PD feedback on output]
 """
-Kp1 = 6.0
-Ki  = 5.0
+Kp1 = 50.0
+Ki  = 3.0
 
-Kp2 = 1.0
-Kd  = 0.65
+Kp2 = 2.0
+Kd  = 5
 
 t0 = 1.0
 r_max = 5.0
+r = lambda t: r_max * sin(2 * pi * 0.5 * t)  # Sinusoidal reference input (0.5 Hz)
 
 r = lambda t: r_max * (t > t0)  # Step reference input (1 rad)
 
-r = lambda t: r_max * sin(2 * pi * 0.5 * t)  # Sinusoidal reference input (0.5 Hz)
 
 
 """
@@ -68,7 +86,7 @@ State-space realisation  x = [θ, ω, i_a]:
 
 
 def voltage_clamp(V):
-    return np.clip(V, -V_sat, V_sat)
+    return np.clip(V, -V_supply, V_supply)
 
 
 def control_law(theta, theta_error, omega, e_int):
@@ -79,17 +97,17 @@ def control_law(theta, theta_error, omega, e_int):
 def pwm_voltage(t, V_ideal):
     """Convert an ideal voltage to a unipolar PWM signal.
 
-    Duty cycle: d = |V_ideal| / V_sat  ∈ [0, 1]
-    Active level: sign(V_ideal) * V_sat
+    Duty cycle: d = |V_ideal| / V_supply  ∈ [0, 1]
+    Active level: sign(V_ideal) * V_supply
     Off level: 0 V
 
-    Positive V_ideal → switches between +V_sat and 0.
-    Negative V_ideal → switches between -V_sat and 0.
+    Positive V_ideal → switches between +V_supply and 0.
+    Negative V_ideal → switches between -V_supply and 0.
     Works with both scalars and numpy arrays.
     """
-    d = np.abs(V_ideal) / V_sat                 # duty cycle ∈ [0, 1]
+    d = np.abs(V_ideal) / V_supply                 # duty cycle ∈ [0, 1]
     phase = (t % pwm_period) / pwm_period       # phase within current period ∈ [0, 1)
-    active = np.sign(V_ideal) * V_sat
+    active = np.sign(V_ideal) * V_supply
     pwm = np.where(phase < d, active, 0.0)
     return np.where(np.abs(V_ideal) < voltage_turnoff, 0.0, pwm)  # zero output at low voltages
 
@@ -153,8 +171,8 @@ if __name__ == "__main__":
     axes[2].plot(t_pwm, pwm_signal, color='tab:orange', label='V PWM (V)', linewidth=0.5, alpha=0.5)
     axes[2].plot(t_eval, V_ideal, color='tab:green', label='V ideal (V)', linewidth=1.5)
     axes[2].plot(t_pwm, pwm_average, color='tab:red', label='V avg (V)', linewidth=1.5, linestyle='--')
-    axes[2].axhline(V_sat, color='gray', linestyle=':', label=f'V_sat = ±{V_sat} V')
-    axes[2].axhline(-V_sat, color='gray', linestyle=':')
+    axes[2].axhline(V_supply, color='gray', linestyle=':', label=f'V_supply = ±{V_supply} V')
+    axes[2].axhline(-V_supply, color='gray', linestyle=':')
     axes[2].axhline(voltage_turnoff, color='purple', linestyle='--', linewidth=1.0, label=f'V_turnoff = ±{voltage_turnoff} V')
     axes[2].axhline(-voltage_turnoff, color='purple', linestyle='--', linewidth=1.0)
     axes[2].legend(loc='upper left')
@@ -162,15 +180,14 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     plt.savefig(f"{save_folder_path}/{filename}")
-    plt.show()
 
     # Save the PWM subplot separately
     fig_pwm, ax_pwm = plt.subplots(figsize=(12, 4))
     ax_pwm.plot(t_pwm, pwm_signal, color='tab:orange', label='V PWM (V)', linewidth=0.5, alpha=0.5)
     ax_pwm.plot(t_eval, V_ideal, color='tab:green', label='V ideal (V)', linewidth=1.5)
     ax_pwm.plot(t_pwm, pwm_average, color='tab:red', label='V avg (V)', linewidth=1.5, linestyle='--')
-    ax_pwm.axhline(V_sat, color='gray', linestyle=':', label=f'V_sat = ±{V_sat} V')
-    ax_pwm.axhline(-V_sat, color='gray', linestyle=':')
+    ax_pwm.axhline(V_supply, color='gray', linestyle=':', label=f'V_supply = ±{V_supply} V')
+    ax_pwm.axhline(-V_supply, color='gray', linestyle=':')
     ax_pwm.axhline(voltage_turnoff, color='purple', linestyle='--', linewidth=1.0, label=f'V_turnoff = ±{voltage_turnoff} V')
     ax_pwm.axhline(-voltage_turnoff, color='purple', linestyle='--', linewidth=1.0)
     ax_pwm.legend(loc='upper left')
