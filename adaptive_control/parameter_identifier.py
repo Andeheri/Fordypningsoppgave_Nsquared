@@ -85,7 +85,7 @@ numerator3 = [La, Ra]              # La*s + Ra
 numerator4 = [-La, -Ra]            # -La*s - Ra
 denominator4 = [1.0, lambda2, lambda1, lambda0, 0.0]  # Λ(s) = s^4 + λ2 s^3 + λ1 s^2 + λ0 s
 filter_method = "bilinear"
-
+print("Discretizing filters...")
 bz_q, az_q, _ = cont2discrete((numeratorz_q, denominator), dt=dt, method=filter_method)
 bz_Ea, az_Ea, _ = cont2discrete((numeratorz_Ea, denominator), dt=dt, method=filter_method)
 b1, a1, _ = cont2discrete((numerator1, denominator), dt=dt, method=filter_method)
@@ -195,10 +195,9 @@ ms2    = np.zeros(num_steps)
 phi_log   = np.zeros((4, num_steps))
 theta     = np.zeros((4, num_steps))
 
-# θ = [β/(m l^2), g/l, 1/(m l^2)]
 theta[:, 0] = np.array([Jm + m_0, Bm + c_0, k_0, k_0 * q0_0], dtype=float)
 P = P_0.copy()
-
+print("Initial parameter estimates:")
 # ------------------------------- Simulation -------------------------------
 for k in tqdm(range(num_steps-1), desc="Simulating"):
     # plant
