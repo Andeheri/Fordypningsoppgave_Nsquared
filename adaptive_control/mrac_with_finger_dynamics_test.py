@@ -170,6 +170,30 @@ _force_s   = (force_s1, force_s2, force_s3)
 _force_r   = (r_circle1, r_circle2, r_circle3)   
 _force_aim = (aim_frac1, aim_frac2, aim_frac3)
 
+# ---- Baumgarte constraint stabilization gains ----------------------------
+# These correct numerical drift in the holonomic cable-length constraint
+# r_spindle*theta + L_finger(phi) = C_cable.
+# Setting both to zero recovers the original (drift-prone) formulation.
+# A value of ~50 damps constraint errors in roughly 1/50 seconds.
+alpha_B = 50.0   # velocity-level correction gain
+beta_B  = 50.0   # position-level correction gain
+
+def _finger_cable_length(phi_1, phi_2):
+    """Geometric cable length on the finger side of the whiffle tree [m].
+    Decreases as the finger flexes (cable is pulled taut)."""
+    a1 = phi_1
+    a2 = phi_1 + phi_2
+    att1 = np.array([force_s1*cos(a1) - r_circle1*sin(a1),
+                     force_s1*sin(a1) + r_circle1*cos(a1)])
+    att2 = np.array([l1*cos(a1) + force_s2*cos(a2) - r_circle2*sin(a2),
+                     l1*sin(a1) + force_s2*sin(a2) + r_circle2*cos(a2)])
+    target1 = np.array([-_force_aim[0] * l0, 0.0])
+    target2 = _force_aim[1] * l1 * np.array([cos(a1), sin(a1)])
+    return wt_frac1 * np.linalg.norm(target1 - att1) + wt_frac2 * np.linalg.norm(target2 - att2)
+
+# Cable-length constant: r_spindle*theta + L_finger(phi) = C_cable (conserved)
+C_cable = r_spindle * 0.0 + _finger_cable_length(phi1_0, phi2_0)
+
 should_save_animation = True  # Set to True to save the animation as a GIF file
 should_show_plots = False  # Set to False to skip showing plots (useful when only saving the animation)
 note = "prior_to_motor_integration"  # A note to include in the filename for clarity
@@ -195,8 +219,12 @@ def closed_loop_dynamics(t, z):
 
     Architecture:
       - MRAC outer loop  : computes desired current i_cmd = -K@x + L*r
-      - Mechanical plant : driven by actual i_cmd
-      - Adaptive law     : sees i_cmd as the nominal input (two-timescale separation)
+      - Cable constraint : inextensible cable links motor spindle to finger via whiffle tree.
+                          Velocity constraint:  r_spindle * omega = J_cable @ q_dot
+                          Solved for T_cable (Lagrange multiplier) at each step.
+      - Motor EOM        : Jm*domega = Kt*i_cmd - Bm*omega - r_spindle*T_cable
+      - Finger EOM       : M*q_ddot = -C*q_dot - tau_k - tau_b + J_cable*T_cable
+      - Adaptive law     : standard MRAC on motor state
     """
     theta, omega = z[0], z[1]
     xm = z[2:4]
@@ -211,38 +239,78 @@ def closed_loop_dynamics(t, z):
 
     # MRAC outer loop: desired current command
     i_cmd = control_law(x, r_t, K, L)
-    output_force = Kt * i_cmd / r_spindle
 
-    # Finger dynamics
+    # ---- Cable Jacobian: r_spindle * omega = J_cable @ q_dot ----
+    # J_cable (shape 3,) is the row vector such that the instantaneous cable
+    # shortening rate equals r_spindle * omega.
+    a1 = phi_1
+    a2 = phi_1 + phi_2
+    MCP = np.array([l1*cos(a1), l1*sin(a1)])
+    att1 = np.array([force_s1*cos(a1) - r_circle1*sin(a1),
+                     force_s1*sin(a1) + r_circle1*cos(a1)])
+    att2 = MCP + np.array([force_s2*cos(a2) - r_circle2*sin(a2),
+                           force_s2*sin(a2) + r_circle2*cos(a2)])
+    target1 = np.array([-_force_aim[0] * l0, 0.0])
+    target2 = _force_aim[1] * l1 * np.array([cos(a1), sin(a1)])
+
+    def _unit(v):
+        n = np.linalg.norm(v)
+        return v / n if n > 1e-12 else np.zeros(2)
+
+    d1 = _unit(target1 - att1)
+    d2 = _unit(target2 - att2)
+
+    J1 = np.array([
+        [-(force_s1*sin(a1) + r_circle1*cos(a1)), 0., 0.],
+        [ force_s1*cos(a1) - r_circle1*sin(a1),   0., 0.],
+    ])
+    J2 = np.array([
+        [-(l1*sin(a1) + force_s2*sin(a2) + r_circle2*cos(a2)), -(force_s2*sin(a2) + r_circle2*cos(a2)), 0.],
+        [ l1*cos(a1) + force_s2*cos(a2) - r_circle2*sin(a2),    force_s2*cos(a2) - r_circle2*sin(a2),   0.],
+    ])
+    J_cable = wt_frac1 * (d1 @ J1) + wt_frac2 * (d2 @ J2)  # shape (3,)
+
+    # ---- Finger dynamics matrices ----
     M_mat = M(phi_1, phi_2, phi_3)
     C_mat = C(phi_1, phi_2, phi_3, phi_1_dot, phi_2_dot, phi_3_dot)
     tau_k = Tau_K(phi_1, phi_2, phi_3)
     tau_b = Tau_B(phi_1_dot, phi_2_dot, phi_3_dot)
-    _force_F = np.array((wt_frac1 * output_force, wt_frac2 * output_force, 0.0))
-    tau_ext = tau_link_forces(phi_1, phi_2, phi_3, t, z[7:13], _force_s, _force_r, _force_F, _force_aim)
     q_dot = np.array([phi_1_dot, phi_2_dot, phi_3_dot])
+    tau_passive = -C_mat @ q_dot - tau_k - tau_b
 
-    # Cable tension the finger's internal model puts on the whiffle tree,
-    # i.e. the force the motor would experience from the finger via the cable.
-    # NOTE: used as a diagnostic / output variable only — NOT fed into the motor
-    # ODE, because cable_tensions() inverts a geometry matrix that becomes singular
-    # at reachable finger configurations (e.g. phi2 ≈ π/2), which would crash the
-    # solver.  Wire it into domega only once a robust cable-constraint model exists.
-    _finger_state = np.array([phi_1, phi_2, phi_3, phi_1_dot, phi_2_dot, phi_3_dot])
-    T_cables = cable_tensions(_finger_state, _force_s, _force_r, _force_aim)
-    F_motor_from_finger = (wt_frac1 * T_cables[0] + wt_frac2 * T_cables[1]) / (wt_frac1**2 + wt_frac2**2)
+    # ---- Constraint-consistent cable tension (Lagrange multiplier) ----
+    # Differentiating g = r_spindle*theta + L_finger(phi) - C_cable = 0 twice:
+    #   g_ddot = RHS_phys - H*T
+    # Baumgarte replaces g_ddot = 0 with g_ddot = -2*alpha_B*g_vel - beta_B^2*g_pos,
+    # giving a stable 2nd-order error dynamics. Solving for T:
+    #
+    #   H * T_cable = r_spindle*(Kt*i_cmd - Bm*omega)/Jm - J_cable @ M^{-1} @ tau_passive
+    #              + 2*alpha_B * g_vel + beta_B^2 * g_pos   (Baumgarte: note + signs)
+    #
+    # where  H = r_spindle^2/Jm + J_cable @ M^{-1} @ J_cable^T
+    #        g_vel = r_spindle*omega - J_cable @ q_dot       (velocity constraint error)
+    #        g_pos = r_spindle*theta + L_finger(phi) - C_cable  (position constraint error)
+    M_inv = np.linalg.inv(M_mat)
+    H = r_spindle**2 / Jm + float(J_cable @ M_inv @ J_cable)
+    L_finger = wt_frac1 * np.linalg.norm(target1 - att1) + wt_frac2 * np.linalg.norm(target2 - att2)
+    g_pos = r_spindle * theta + L_finger - C_cable
+    g_vel = r_spindle * omega - float(J_cable @ q_dot)
+    T_cable = (r_spindle * (Kt * i_cmd - Bm * omega) / Jm
+               - float(J_cable @ M_inv @ tau_passive)
+               + 2.0 * alpha_B * g_vel
+               + beta_B**2   * g_pos) / H
 
-    rhs = -C_mat @ q_dot - tau_k - tau_b + tau_ext
-    q_ddot = np.linalg.solve(M_mat, rhs)
+    # ---- Finger EOM (cable enters as J_cable * T_cable) ----
+    q_ddot = M_inv @ (tau_passive + J_cable * T_cable)
 
-    # Mechanical plant (driven by actual current i_a)
+    # ---- Motor EOM (cable tension loads the spindle) ----
     dtheta = omega
-    domega = float(A_true[1, 0] * theta + A_true[1, 1] * omega + B_true[1, 0] * i_cmd + d_true(0)[1])
+    domega = (Kt * i_cmd - Bm * omega - r_spindle * T_cable) / Jm
 
-    # Reference model
+    # ---- Reference model ----
     dxm = A_m @ xm + B_m.flatten() * r_t
 
-    # MRAC adaptive law (uses i_cmd as nominal control input)
+    # ---- MRAC adaptive law ----
     sigma = (B_m.T @ P @ e.reshape(-1, 1)).item()
     dK    = Gamma_K @ x * sigma
     dL    = -gamma_L * r_t * sigma
