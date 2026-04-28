@@ -31,9 +31,9 @@ force_s3 = l3 * 0.5   # link 3 – circle mounted at midpoint
 # Circle radii mounted at each link midpoint [m]
 # The pulling force is applied at the circumference of the circle,
 # offset perpendicularly (radially outward, 90° CCW from link axis) from the midpoint.
-r_circle1 = 0.005   # link 1 – circle radius [m]
-r_circle2 = 0.005   # link 2 – circle radius [m]
-r_circle3 = 0.005   # link 3 – circle radius [m]
+r_circle1 = 0.010   # link 1 – circle radius [m]
+r_circle2 = 0.010   # link 2 – circle radius [m]
+r_circle3 = 0.010   # link 3 – circle radius [m]
 
 # ---- Whiffle tree configuration -----------------------------------------
 # One motor pulls a whiffle tree that distributes force to links 1 and 2.

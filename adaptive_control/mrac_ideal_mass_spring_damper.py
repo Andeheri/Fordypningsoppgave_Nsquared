@@ -64,6 +64,19 @@ d_true = np.array([
 ])
 
 """
+Internal model
+"""
+A_ = np.array([
+    [0.0, 1.0],
+    [0.0, -Bm / Jm]
+])
+
+B_ = np.array([
+    [0.0],
+    [Kt / Jm]
+])
+
+"""
 Reference model
 Choose desired theta-tracking dynamics here
 """
@@ -96,11 +109,12 @@ L_star = float(np.squeeze(np.linalg.pinv(B_true) @ B_m))
 K_0 = (np.linalg.pinv(B_true) @ A_m).flatten()
 L_0 = float(np.squeeze(np.linalg.pinv(B_m) @ B_m))
 
-K_0 = [379.32208797468064, 71.3188923817386]
-L_0 = 347.04949913880426
+K_0 = (np.linalg.pinv(B_) @ (A_ - A_m)).flatten().tolist()
+L_0 = float(np.squeeze(np.linalg.pinv(B_) @ B_m))
 
 K_0 = [0.0, 0.0]
 L_0 = 1.0
+
 
 print("K_star =", K_star)
 print("L_star =", L_star)

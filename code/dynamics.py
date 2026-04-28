@@ -8,7 +8,7 @@ l0 = 0.048  # Metacarpal length [m]
 r1, r2, r3 = 0.085, 0.085, 0.085  # Radii [m]
 N_max = 22 # Maybe 30
 cable_speed = 67  # mm/s
-k1, k2, k3 = 0.05, 0.05, 0.05  # Spring constants [N*m/rad]
+k1, k2, k3 = 1.0, 1.0, 1.0  # Spring constants [N*m/rad]
 b1, b2, b3 = 0.01, 0.01, 0.01  # Damping coefficients [N*m*s/rad]
 
 theta1_0, theta2_0, theta3_0 = pi/6, pi/4, pi/12  # Spring rest angles [rad]
