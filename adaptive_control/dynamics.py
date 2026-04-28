@@ -11,16 +11,16 @@ cable_speed = 67  # mm/s
 k1, k2, k3 = 0.05, 0.05, 0.05  # Spring constants [N*m/rad]
 b1, b2, b3 = 0.01, 0.01, 0.01  # Damping coefficients [N*m*s/rad]
 
-theta1_0, theta2_0, theta3_0 = pi/6, pi/4, pi/12  # Spring rest angles [rad]
+phi1_eq, phi2_eq, phi3_eq = pi/6, pi/4, pi/12  # Spring rest angles [rad]
 
-def Tau_K(theta1, theta2, theta3):
+def Tau_K(phi1, phi2, phi3):
     """
     3x1 vector of spring forces.
     
     Parameters
     ----------
-    theta1, theta2, theta3   : Relative joint angles [rad]
-    theta1_0, theta2_0, theta3_0 : spring rest angles [rad]
+    phi1, phi2, phi3   : Relative joint angles [rad]
+    phi1_eq, phi2_eq, phi3_eq : spring rest angles [rad]
     k1, k2, k3   : spring constants [N*m/rad]
 
     Returns
@@ -28,20 +28,20 @@ def Tau_K(theta1, theta2, theta3):
     Tau_K : np.ndarray, shape (3, 1)
     """
     Tau_K = np.array([
-        k1*(theta1 - theta1_0),
-        k2*(theta2 - theta2_0),
-        k3*(theta3 - theta3_0),
+        k1*(phi1 - phi1_eq),
+        k2*(phi2 - phi2_eq),
+        k3*(phi3 - phi3_eq),
     ])
     return Tau_K
 
 
-def Tau_B(theta1_dot, theta2_dot, theta3_dot):
+def Tau_B(phi1_dot, phi2_dot, phi3_dot):
     """
     3x1 vector of damping forces.
     
     Parameters
     ----------
-    theta1_dot, theta2_dot, theta3_dot : joint angular velocities [rad/s]
+    phi1_dot, phi2_dot, phi3_dot : joint angular velocities [rad/s]
     b1, b2, b3   : damping coefficients [N*m*s/rad]
 
     Returns
@@ -49,22 +49,22 @@ def Tau_B(theta1_dot, theta2_dot, theta3_dot):
     Tau_B : np.ndarray, shape (3, 1)
     """
     Tau_B = np.array([
-        b1*theta1_dot,
-        b2*theta2_dot,
-        b3*theta3_dot,
+        b1*phi1_dot,
+        b2*phi2_dot,
+        b3*phi3_dot,
     ])
     return Tau_B
 
 
-def C(theta1, theta2, theta3, theta1_dot, theta2_dot, theta3_dot):
+def C(phi1, phi2, phi3, phi1_dot, phi2_dot, phi3_dot):
     """
     3x3 Coriolis and centrifugal matrix C(q, q_dot) for a 3-link planar finger.
     All links are modelled as solid cylinders.
     
     Parameters
     ----------
-    theta1, theta2, theta3   : joint angles [rad]
-    theta1_dot, theta2_dot, theta3_dot : joint angular velocities [rad/s]
+    phi1, phi2, phi3   : joint angles [rad]
+    phi1_dot, phi2_dot, phi3_dot : joint angular velocities [rad/s]
     m1, m2, m3   : link masses  [kg]
     l1, l2, l3   : link lengths [m]
     r1, r2, r3   : link radii   [m]
@@ -74,20 +74,20 @@ def C(theta1, theta2, theta3, theta1_dot, theta2_dot, theta3_dot):
     C : np.ndarray, shape (3, 3)
     """
     return np.array([
-        [-l1*theta2_dot*(l2*m2*sin(theta2) + 2*l2*m3*sin(theta2) + l3*m3*sin(theta2 + theta3))/2 - l3*m3*theta3_dot*(l1*sin(theta2 + theta3) + l2*sin(theta3))/2, -l1*theta1_dot*(l2*m2*sin(theta2) + 2*l2*m3*sin(theta2) + l3*m3*sin(theta2 + theta3))/2 - l1*theta2_dot*(l2*m2*sin(theta2) + 2*l2*m3*sin(theta2) + l3*m3*sin(theta2 + theta3))/2 - l3*m3*theta3_dot*(l1*sin(theta2 + theta3) + l2*sin(theta3))/2, l3*m3*(l1*sin(theta2 + theta3) + l2*sin(theta3))*(-theta1_dot - theta2_dot - theta3_dot)/2],
-        [l1*theta1_dot*(l2*m2*sin(theta2) + 2*l2*m3*sin(theta2) + l3*m3*sin(theta2 + theta3))/2 - l2*l3*m3*theta3_dot*sin(theta3)/2, -l2*l3*m3*theta3_dot*sin(theta3)/2, l2*l3*m3*(-theta1_dot - theta2_dot - theta3_dot)*sin(theta3)/2],
-        [l3*m3*(l2*theta2_dot*sin(theta3) + theta1_dot*(l1*sin(theta2 + theta3) + l2*sin(theta3)))/2, l2*l3*m3*(theta1_dot + theta2_dot)*sin(theta3)/2, 0],
+        [-l1*phi2_dot*(l2*m2*sin(phi2) + 2*l2*m3*sin(phi2) + l3*m3*sin(phi2 + phi3))/2 - l3*m3*phi3_dot*(l1*sin(phi2 + phi3) + l2*sin(phi3))/2, -l1*phi1_dot*(l2*m2*sin(phi2) + 2*l2*m3*sin(phi2) + l3*m3*sin(phi2 + phi3))/2 - l1*phi2_dot*(l2*m2*sin(phi2) + 2*l2*m3*sin(phi2) + l3*m3*sin(phi2 + phi3))/2 - l3*m3*phi3_dot*(l1*sin(phi2 + phi3) + l2*sin(phi3))/2, l3*m3*(l1*sin(phi2 + phi3) + l2*sin(phi3))*(-phi1_dot - phi2_dot - phi3_dot)/2],
+        [l1*phi1_dot*(l2*m2*sin(phi2) + 2*l2*m3*sin(phi2) + l3*m3*sin(phi2 + phi3))/2 - l2*l3*m3*phi3_dot*sin(phi3)/2, -l2*l3*m3*phi3_dot*sin(phi3)/2, l2*l3*m3*(-phi1_dot - phi2_dot - phi3_dot)*sin(phi3)/2],
+        [l3*m3*(l2*phi2_dot*sin(phi3) + phi1_dot*(l1*sin(phi2 + phi3) + l2*sin(phi3)))/2, l2*l3*m3*(phi1_dot + phi2_dot)*sin(phi3)/2, 0],
     ])
 
 
-def M(theta1, theta2, theta3):
+def M(phi1, phi2, phi3):
     """
     3x3 mass matrix M(q) for a 3-link planar finger.
     All links are modelled as solid cylinders.
 
     Parameters
     ----------
-    theta1, theta2, theta3   : joint angles [rad]
+    phi1, phi2, phi3   : joint angles [rad]
     m1, m2, m3   : link masses  [kg]
     l1, l2, l3   : link lengths [m]
     r1, r2, r3   : link radii   [m]
@@ -97,13 +97,13 @@ def M(theta1, theta2, theta3):
     M : np.ndarray, shape (3, 3)
     """
     return np.array([
-        [7*l1**2*m1/12 + l1**2*m2 + l1**2*m3 + l1*l2*m2*cos(theta2) + 2*l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3) + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m1*r1**2/4 + m2*r2**2/4 + m3*r3**2/4, l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, m3*(6*l1*l3*cos(theta2 + theta3) + 6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12],
-        [l1*l2*m2*cos(theta2)/2 + l1*l2*m3*cos(theta2) + l1*l3*m3*cos(theta2 + theta3)/2 + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(theta3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, m3*(6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12],
-        [m3*(6*l1*l3*cos(theta2 + theta3) + 6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12, m3*(6*l2*l3*cos(theta3) + 7*l3**2 + 3*r3**2)/12, m3*(7*l3**2 + 3*r3**2)/12],
+        [7*l1**2*m1/12 + l1**2*m2 + l1**2*m3 + l1*l2*m2*cos(phi2) + 2*l1*l2*m3*cos(phi2) + l1*l3*m3*cos(phi2 + phi3) + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(phi3) + 7*l3**2*m3/12 + m1*r1**2/4 + m2*r2**2/4 + m3*r3**2/4, l1*l2*m2*cos(phi2)/2 + l1*l2*m3*cos(phi2) + l1*l3*m3*cos(phi2 + phi3)/2 + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(phi3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, m3*(6*l1*l3*cos(phi2 + phi3) + 6*l2*l3*cos(phi3) + 7*l3**2 + 3*r3**2)/12],
+        [l1*l2*m2*cos(phi2)/2 + l1*l2*m3*cos(phi2) + l1*l3*m3*cos(phi2 + phi3)/2 + 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(phi3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, 7*l2**2*m2/12 + l2**2*m3 + l2*l3*m3*cos(phi3) + 7*l3**2*m3/12 + m2*r2**2/4 + m3*r3**2/4, m3*(6*l2*l3*cos(phi3) + 7*l3**2 + 3*r3**2)/12],
+        [m3*(6*l1*l3*cos(phi2 + phi3) + 6*l2*l3*cos(phi3) + 7*l3**2 + 3*r3**2)/12, m3*(6*l2*l3*cos(phi3) + 7*l3**2 + 3*r3**2)/12, m3*(7*l3**2 + 3*r3**2)/12],
     ])
 
 
-def tau_link_forces(theta1, theta2, theta3, t, state, force_s, r_circle, F_link, aim_frac):
+def tau_link_forces(phi1, phi2, phi3, t, state, force_s, r_circle, F_link, aim_frac):
     """
     Generalized torques from three link forces, via the virtual-work principle.
 
@@ -127,7 +127,7 @@ def tau_link_forces(theta1, theta2, theta3, t, state, force_s, r_circle, F_link,
 
     where the cumulative joint angles are
 
-        a1 = theta1,   a2 = theta1+theta2,   a3 = theta1+theta2+theta3.
+        a1 = phi1,   a2 = phi1+phi2,   a3 = phi1+phi2+phi3.
 
     Attachment-point world coordinates
     -----------------------------------
@@ -156,9 +156,9 @@ def tau_link_forces(theta1, theta2, theta3, t, state, force_s, r_circle, F_link,
 
     Parameters
     ----------
-    theta1, theta2, theta3 : joint angles [rad]
+    phi1, phi2, phi3 : joint angles [rad]
     t                      : current simulation time [s]
-    aim_frac               : tuple (aim1, aim2, aim3) – fractional position (0–1)
+    aim_frac               : tuple (aim1, aim2, aim3) - fractional position (0-1)
                              along the link below where each force aims.
 
     Returns
@@ -170,9 +170,9 @@ def tau_link_forces(theta1, theta2, theta3, t, state, force_s, r_circle, F_link,
     F_link1, F_link2, F_link3 = F_link
     aim1, aim2, aim3 = aim_frac
 
-    a1 = theta1
-    a2 = theta1 + theta2
-    a3 = theta1 + theta2 + theta3
+    a1 = phi1
+    a2 = phi1 + phi2
+    a3 = phi1 + phi2 + phi3
 
     # World-frame joint positions
     MCP = np.array([l1*cos(a1), l1*sin(a1)])
@@ -202,7 +202,7 @@ def tau_link_forces(theta1, theta2, theta3, t, state, force_s, r_circle, F_link,
         [-(force_s1*sin(a1) + r_circle1*cos(a1)),  0.0,  0.0],
         [ force_s1*cos(a1) - r_circle1*sin(a1),    0.0,  0.0],
     ])
-    F1 = F_link1(t, state) * np.array([cos(phi1), sin(phi1)])
+    F1 = F_link1 * np.array([cos(phi1), sin(phi1)])
     tau1 = J1.T @ F1
 
     # ---- Link 2 force ----
@@ -211,7 +211,7 @@ def tau_link_forces(theta1, theta2, theta3, t, state, force_s, r_circle, F_link,
         [-(l1*sin(a1) + force_s2*sin(a2) + r_circle2*cos(a2)),  -(force_s2*sin(a2) + r_circle2*cos(a2)),  0.0],
         [ l1*cos(a1) + force_s2*cos(a2) - r_circle2*sin(a2),     force_s2*cos(a2) - r_circle2*sin(a2),   0.0],
     ])
-    F2 = F_link2(t, state) * np.array([cos(phi2), sin(phi2)])
+    F2 = F_link2 * np.array([cos(phi2), sin(phi2)])
     tau2 = J2.T @ F2
 
     # ---- Link 3 force ----
@@ -220,7 +220,7 @@ def tau_link_forces(theta1, theta2, theta3, t, state, force_s, r_circle, F_link,
         [-(l1*sin(a1) + l2*sin(a2) + force_s3*sin(a3) + r_circle3*cos(a3)),  -(l2*sin(a2) + force_s3*sin(a3) + r_circle3*cos(a3)),  -(force_s3*sin(a3) + r_circle3*cos(a3))],
         [ l1*cos(a1) + l2*cos(a2) + force_s3*cos(a3) - r_circle3*sin(a3),     l2*cos(a2) + force_s3*cos(a3) - r_circle3*sin(a3),     force_s3*cos(a3) - r_circle3*sin(a3)  ],
     ])
-    F3 = F_link3(t, state) * np.array([cos(phi3), sin(phi3)])
+    F3 = F_link3 * np.array([cos(phi3), sin(phi3)])
     tau3 = J3.T @ F3
 
     return tau1 + tau2 + tau3
@@ -229,14 +229,14 @@ def tau_link_forces(theta1, theta2, theta3, t, state, force_s, r_circle, F_link,
 
 def dynamics(t, state, force_s=None, r_circle=None, F_link=None, aim_frac=None):
     """
-    State vector: [theta1, theta2, theta3, theta1_dot, theta2_dot, theta3_dot]
+    State vector: [phi1, phi2, phi3, phi1_dot, phi2_dot, phi3_dot]
     EOM: M(q)*q_ddot + C(q,q_dot)*q_dot + Tau_K(q) + Tau_B(q_dot) = 0
     => q_ddot = M^{-1} * (-C*q_dot - Tau_K - Tau_B + tau_ext)
 
-    force_s  : tuple (s1, s2, s3) – attachment distances along each link [m]
-    r_circle : tuple (r1, r2, r3) – circle radii at the midpoints [m]
-    F_link   : tuple of three callables  F_i(t, state) -> float [N]
-    aim_frac : tuple (aim1, aim2, aim3) – fractional target positions (0–1) on
+    force_s  : tuple (s1, s2, s3) - attachment distances along each link [m]
+    r_circle : tuple (r1, r2, r3) - circle radii at the midpoints [m]
+    F_link   : tuple of three floats  F_i -> float [N]
+    aim_frac : tuple (aim1, aim2, aim3) - fractional target positions (0-1) on
                the link below.  Pass None to disable external forces.
     """
     th1, th2, th3, th1d, th2d, th3d = state
@@ -276,10 +276,10 @@ def cable_tensions(state, force_s, r_circle, aim_frac):
 
     Parameters
     ----------
-    state    : array-like [theta1, theta2, theta3, theta1_dot, theta2_dot, theta3_dot]
-    force_s  : tuple (s1, s2, s3) – attachment distances [m]
-    r_circle : tuple (r1, r2, r3) – circle radii [m]
-    aim_frac : tuple (aim1, aim2, aim3) – fractional target positions (0–1)
+    state    : array-like [phi1, phi2, phi3, phi1_dot, phi2_dot, phi3_dot]
+    force_s  : tuple (s1, s2, s3) - attachment distances [m]
+    r_circle : tuple (r1, r2, r3) - circle radii [m]
+    aim_frac : tuple (aim1, aim2, aim3) - fractional target positions (0-1)
 
     Returns
     -------
