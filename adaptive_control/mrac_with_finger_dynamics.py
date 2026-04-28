@@ -139,16 +139,11 @@ r_circle2 = 0.010   # link 2 – circle radius [m]
 r_circle3 = 0.010   # link 3 – circle radius [m]
 
 # ---- Whiffle tree configuration -----------------------------------------
-# One motor pulls a whiffle tree that distributes force to links 1 and 2.
-# wt_frac1 + wt_frac2 must equal 1.  (e.g. 2/3 to link 1, 1/3 to link 2)
-wt_frac1 = 2/3   # fraction of motor force delivered to link 1
-wt_frac2 = 1/3   # fraction of motor force delivered to link 2
-
-# Force magnitude at each timestep [N] — callables  F(t, state) -> float.
-# Derived from u(t) via the whiffle tree fractions. F_link3 is independent.
-F_link1 = lambda t, state: wt_frac1 * u(t)
-F_link2 = lambda t, state: wt_frac2 * u(t)
-F_link3 = lambda t, state: 0.0   # not driven by the whiffle tree
+# One motor pulls a whiffle tree that distributes force to links 1, 2, and 3.
+# wt_frac1 + wt_frac2 + wt_frac3 must equal 1.
+wt_frac1 = 3/6   # fraction of motor force delivered to link 1
+wt_frac2 = 2/6   # fraction of motor force delivered to link 2
+wt_frac3 = 1/6   # fraction of motor force delivered to link 3
 
 # Aim target fractions (0–1): the force on each link points FROM the attachment
 # point TOWARDS a fractional position along the link below it.
@@ -171,21 +166,29 @@ _force_aim = (aim_frac1, aim_frac2, aim_frac3)
 alpha_B = 50.0   # velocity-level correction gain
 beta_B  = 50.0   # position-level correction gain
 
-def _finger_cable_length(phi_1, phi_2):
+def _finger_cable_length(phi_1, phi_2, phi_3=0.0):
     """Geometric cable length on the finger side of the whiffle tree [m].
     Decreases as the finger flexes (cable is pulled taut)."""
     a1 = phi_1
     a2 = phi_1 + phi_2
+    a3 = phi_1 + phi_2 + phi_3
+    MCP = np.array([l1*cos(a1), l1*sin(a1)])
+    PIP = MCP + np.array([l2*cos(a2), l2*sin(a2)])
     att1 = np.array([force_s1*cos(a1) - r_circle1*sin(a1),
                      force_s1*sin(a1) + r_circle1*cos(a1)])
-    att2 = np.array([l1*cos(a1) + force_s2*cos(a2) - r_circle2*sin(a2),
-                     l1*sin(a1) + force_s2*sin(a2) + r_circle2*cos(a2)])
+    att2 = MCP + np.array([force_s2*cos(a2) - r_circle2*sin(a2),
+                           force_s2*sin(a2) + r_circle2*cos(a2)])
+    att3 = PIP + np.array([force_s3*cos(a3) - r_circle3*sin(a3),
+                           force_s3*sin(a3) + r_circle3*cos(a3)])
     target1 = np.array([-_force_aim[0] * l0, 0.0])
     target2 = _force_aim[1] * l1 * np.array([cos(a1), sin(a1)])
-    return wt_frac1 * np.linalg.norm(target1 - att1) + wt_frac2 * np.linalg.norm(target2 - att2)
+    target3 = MCP + _force_aim[2] * l2 * np.array([cos(a2), sin(a2)])
+    return (wt_frac1 * np.linalg.norm(target1 - att1)
+            + wt_frac2 * np.linalg.norm(target2 - att2)
+            + wt_frac3 * np.linalg.norm(target3 - att3))
 
 # Cable-length constant: r_spindle*theta + L_finger(phi) = C_cable (conserved)
-C_cable = r_spindle * 0.0 + _finger_cable_length(phi1_0, phi2_0)
+C_cable = r_spindle * 0.0 + _finger_cable_length(phi1_0, phi2_0, phi3_0)
 
 
 def current_clamp(i_cmd):
@@ -229,13 +232,18 @@ def closed_loop_dynamics(t, z):
     # shortening rate equals r_spindle * omega.
     a1 = phi_1
     a2 = phi_1 + phi_2
+    a3 = phi_1 + phi_2 + phi_3
     MCP = np.array([l1*cos(a1), l1*sin(a1)])
+    PIP = MCP + np.array([l2*cos(a2), l2*sin(a2)])
     att1 = np.array([force_s1*cos(a1) - r_circle1*sin(a1),
                      force_s1*sin(a1) + r_circle1*cos(a1)])
     att2 = MCP + np.array([force_s2*cos(a2) - r_circle2*sin(a2),
                            force_s2*sin(a2) + r_circle2*cos(a2)])
+    att3 = PIP + np.array([force_s3*cos(a3) - r_circle3*sin(a3),
+                           force_s3*sin(a3) + r_circle3*cos(a3)])
     target1 = np.array([-_force_aim[0] * l0, 0.0])
     target2 = _force_aim[1] * l1 * np.array([cos(a1), sin(a1)])
+    target3 = MCP + _force_aim[2] * l2 * np.array([cos(a2), sin(a2)])
 
     def _unit(v):
         n = np.linalg.norm(v)
@@ -243,6 +251,7 @@ def closed_loop_dynamics(t, z):
 
     d1 = _unit(target1 - att1)
     d2 = _unit(target2 - att2)
+    d3 = _unit(target3 - att3)
 
     J1 = np.array([
         [-(force_s1*sin(a1) + r_circle1*cos(a1)), 0., 0.],
@@ -252,7 +261,29 @@ def closed_loop_dynamics(t, z):
         [-(l1*sin(a1) + force_s2*sin(a2) + r_circle2*cos(a2)), -(force_s2*sin(a2) + r_circle2*cos(a2)), 0.],
         [ l1*cos(a1) + force_s2*cos(a2) - r_circle2*sin(a2),    force_s2*cos(a2) - r_circle2*sin(a2),   0.],
     ])
-    J_cable = wt_frac1 * (d1 @ J1) + wt_frac2 * (d2 @ J2)  # shape (3,)
+    J3 = np.array([
+        [-(l1*sin(a1) + l2*sin(a2) + force_s3*sin(a3) + r_circle3*cos(a3)),
+         -(l2*sin(a2) + force_s3*sin(a3) + r_circle3*cos(a3)),
+         -(force_s3*sin(a3) + r_circle3*cos(a3))],
+        [ l1*cos(a1) + l2*cos(a2) + force_s3*cos(a3) - r_circle3*sin(a3),
+          l2*cos(a2) + force_s3*cos(a3) - r_circle3*sin(a3),
+          force_s3*cos(a3) - r_circle3*sin(a3)],
+    ])
+    # target2 and target3 are moving points (on the proximal links), so their
+    # motion w.r.t. joint angles must be subtracted from J2/J3 when computing
+    # the cable-length sensitivity d(||target_i - att_i||)/dphi.
+    # J_target_i = d target_i / d phi  (shape 2x3)
+    J_target2 = np.array([
+        [-_force_aim[1] * l1 * sin(a1), 0., 0.],
+        [ _force_aim[1] * l1 * cos(a1), 0., 0.],
+    ])
+    J_target3 = np.array([
+        [-(l1*sin(a1) + _force_aim[2]*l2*sin(a2)), -_force_aim[2]*l2*sin(a2), 0.],
+        [ l1*cos(a1) + _force_aim[2]*l2*cos(a2),    _force_aim[2]*l2*cos(a2), 0.],
+    ])
+    J_cable = (wt_frac1 * (d1 @ J1)
+             + wt_frac2 * (d2 @ (J2 - J_target2))
+             + wt_frac3 * (d3 @ (J3 - J_target3)))  # shape (3,)
 
     # ---- Finger dynamics matrices ----
     M_mat = M(phi_1, phi_2, phi_3)
@@ -276,7 +307,9 @@ def closed_loop_dynamics(t, z):
     #        g_pos = r_spindle*theta + L_finger(phi) - C_cable  (position constraint error)
     M_inv = np.linalg.inv(M_mat)
     H = r_spindle**2 / Jm + float(J_cable @ M_inv @ J_cable)
-    L_finger = wt_frac1 * np.linalg.norm(target1 - att1) + wt_frac2 * np.linalg.norm(target2 - att2)
+    L_finger = (wt_frac1 * np.linalg.norm(target1 - att1)
+                + wt_frac2 * np.linalg.norm(target2 - att2)
+                + wt_frac3 * np.linalg.norm(target3 - att3))
     g_pos = r_spindle * theta + L_finger - C_cable
     g_vel = r_spindle * omega - float(J_cable @ q_dot)
     T_cable = (r_spindle * (Kt * i_cmd - Bm * omega) / Jm
@@ -328,7 +361,7 @@ def main():
     ]
 
     save_folder = "adaptive_control/figures/with_finger_dynamics"
-    filename = "mrac_with_finger_dynamics_test_decoupling"
+    filename = "mrac_with_finger_dynamics_test_decoupling_all_links"
     should_save_animation = True  # Set to True to save the animation as a GIF file
     should_show_plots = False  # Set to False to skip showing plots (useful when only saving the animation)
     os.makedirs(save_folder, exist_ok=True)
@@ -425,22 +458,39 @@ def main():
         _p1, _p2, _p3 = _s[7:10]
         _d1v, _d2v, _d3v = _s[10:13]
         _icmd = control_law(np.array([_th, _om]), r(_ti), _K_i, _L_i)
-        _a1 = _p1;  _a2 = _p1 + _p2
+        _a1 = _p1;  _a2 = _p1 + _p2;  _a3 = _p1 + _p2 + _p3
+        _MCP = np.array([l1*cos(_a1), l1*sin(_a1)])
+        _PIP = _MCP + np.array([l2*cos(_a2), l2*sin(_a2)])
         _att1 = np.array([force_s1*cos(_a1) - r_circle1*sin(_a1),
                           force_s1*sin(_a1) + r_circle1*cos(_a1)])
-        _att2 = np.array([l1*cos(_a1) + force_s2*cos(_a2) - r_circle2*sin(_a2),
-                          l1*sin(_a1) + force_s2*sin(_a2) + r_circle2*cos(_a2)])
+        _att2 = _MCP + np.array([force_s2*cos(_a2) - r_circle2*sin(_a2),
+                                  force_s2*sin(_a2) + r_circle2*cos(_a2)])
+        _att3 = _PIP + np.array([force_s3*cos(_a3) - r_circle3*sin(_a3),
+                                  force_s3*sin(_a3) + r_circle3*cos(_a3)])
         _tgt1 = np.array([-_force_aim[0] * l0, 0.0])
         _tgt2 = _force_aim[1] * l1 * np.array([cos(_a1), sin(_a1)])
+        _tgt3 = _MCP + _force_aim[2] * l2 * np.array([cos(_a2), sin(_a2)])
         def _un(v): _n = np.linalg.norm(v); return v / _n if _n > 1e-12 else np.zeros(2)
-        _dd1 = _un(_tgt1 - _att1);  _dd2 = _un(_tgt2 - _att2)
+        _dd1 = _un(_tgt1 - _att1);  _dd2 = _un(_tgt2 - _att2);  _dd3 = _un(_tgt3 - _att3)
         _J1 = np.array([[-(force_s1*sin(_a1)+r_circle1*cos(_a1)), 0., 0.],
                         [ force_s1*cos(_a1)-r_circle1*sin(_a1),   0., 0.]])
         _J2 = np.array([[-(l1*sin(_a1)+force_s2*sin(_a2)+r_circle2*cos(_a2)),
                           -(force_s2*sin(_a2)+r_circle2*cos(_a2)), 0.],
                         [ l1*cos(_a1)+force_s2*cos(_a2)-r_circle2*sin(_a2),
                            force_s2*cos(_a2)-r_circle2*sin(_a2),  0.]])
-        _Jc = wt_frac1*(_dd1@_J1) + wt_frac2*(_dd2@_J2)
+        _J3 = np.array([[-(l1*sin(_a1)+l2*sin(_a2)+force_s3*sin(_a3)+r_circle3*cos(_a3)),
+                          -(l2*sin(_a2)+force_s3*sin(_a3)+r_circle3*cos(_a3)),
+                          -(force_s3*sin(_a3)+r_circle3*cos(_a3))],
+                        [ l1*cos(_a1)+l2*cos(_a2)+force_s3*cos(_a3)-r_circle3*sin(_a3),
+                           l2*cos(_a2)+force_s3*cos(_a3)-r_circle3*sin(_a3),
+                           force_s3*cos(_a3)-r_circle3*sin(_a3)]])
+        _Jtgt2 = np.array([[-_force_aim[1]*l1*sin(_a1), 0., 0.],
+                           [ _force_aim[1]*l1*cos(_a1), 0., 0.]])
+        _Jtgt3 = np.array([[-(l1*sin(_a1)+_force_aim[2]*l2*sin(_a2)), -_force_aim[2]*l2*sin(_a2), 0.],
+                           [ l1*cos(_a1)+_force_aim[2]*l2*cos(_a2),    _force_aim[2]*l2*cos(_a2), 0.]])
+        _Jc = (wt_frac1*(_dd1@_J1)
+             + wt_frac2*(_dd2@(_J2-_Jtgt2))
+             + wt_frac3*(_dd3@(_J3-_Jtgt3)))
         _Mm  = M(_p1, _p2, _p3)
         _Cm  = C(_p1, _p2, _p3, _d1v, _d2v, _d3v)
         _tk  = Tau_K(_p1, _p2, _p3)
@@ -449,7 +499,9 @@ def main():
         _tp  = -_Cm@_qd - _tk - _tb
         _Mi  = np.linalg.inv(_Mm)
         _H   = r_spindle**2/Jm + float(_Jc@_Mi@_Jc)
-        _Lf  = wt_frac1*np.linalg.norm(_tgt1-_att1) + wt_frac2*np.linalg.norm(_tgt2-_att2)
+        _Lf  = (wt_frac1*np.linalg.norm(_tgt1-_att1)
+                + wt_frac2*np.linalg.norm(_tgt2-_att2)
+                + wt_frac3*np.linalg.norm(_tgt3-_att3))
         _gp  = r_spindle*_th + _Lf - C_cable
         _gv  = r_spindle*_om - float(_Jc@_qd)
         T_cable_all[_i] = max(0.0, (r_spindle*(Kt*_icmd - Bm*_om)/Jm
@@ -460,13 +512,14 @@ def main():
     _t_arr = sol.t
     _F1_cable = wt_frac1 * T_cable_all
     _F2_cable = wt_frac2 * T_cable_all
+    _F3_cable = wt_frac3 * T_cable_all
     _lf_mag_anim = (
         lambda t, s: float(np.interp(t, _t_arr, _F1_cable)),
         lambda t, s: float(np.interp(t, _t_arr, _F2_cable)),
-        lambda t, s: 0.,
+        lambda t, s: float(np.interp(t, _t_arr, _F3_cable)),
     )
     # Maximum per-link force — sets the full-length arrow reference
-    _force_scale = float(np.max(np.abs([_F1_cable, _F2_cable])))
+    _force_scale = float(np.max(np.abs([_F1_cable, _F2_cable, _F3_cable])))
 
     # ---- Finger animation -----------------------------------------------
     # Wrap the finger portion of the state so animate_finger_simulation sees
