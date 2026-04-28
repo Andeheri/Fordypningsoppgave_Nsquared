@@ -51,17 +51,17 @@ def plot_simulation_angles(t, th1, th2, th3, theta1_0, theta2_0, theta3_0, filep
     fig, ax = plt.subplots(figsize=(9, 5))
     _move_to_secondary(fig)
 
-    ax.plot(t, th1, label=r'$\theta_1$')
-    ax.plot(t, th2, label=r'$\theta_2$')
-    ax.plot(t, th3, label=r'$\theta_3$')
+    ax.plot(t, th1, label=r'$\phi_1$')
+    ax.plot(t, th2, label=r'$\phi_2$')
+    ax.plot(t, th3, label=r'$\phi_3$')
 
     # Spring rest angles as dotted horizontal lines
-    ax.axhline(theta1_0, color='C0', linestyle=':', linewidth=1.2, label=r'$\theta_{1,0}$')
-    ax.axhline(theta2_0, color='C1', linestyle=':', linewidth=1.2, label=r'$\theta_{2,0}$')
-    ax.axhline(theta3_0, color='C2', linestyle=':', linewidth=1.2, label=r'$\theta_{3,0}$')
+    ax.axhline(theta1_0, color='C0', linestyle=':', linewidth=1.2, label=r'$\phi_{1,0}$')
+    ax.axhline(theta2_0, color='C1', linestyle=':', linewidth=1.2, label=r'$\phi_{2,0}$')
+    ax.axhline(theta3_0, color='C2', linestyle=':', linewidth=1.2, label=r'$\phi_{3,0}$')
 
     ax.set_xlabel('Time [s]')
-    ax.set_ylabel('Angle [rad]')
+    ax.set_ylabel('Relative angle [rad]')
     ax.set_title('Finger joint angles over time')
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -76,7 +76,8 @@ def plot_simulation_angles(t, th1, th2, th3, theta1_0, theta2_0, theta3_0, filep
 
 def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
                               link_force_s=None, link_force_mag=None,
-                              link_force_r=None, aim_frac=None, l0=None):
+                              link_force_r=None, aim_frac=None, l0=None,
+                              force_scale=None):
     """
     Animate the simulated finger motion.
 
@@ -94,6 +95,9 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
                     Link 1 aims at the metacarpal (length l0),
                     link 2 at link 1, link 3 at link 2.
     l0            : metacarpal length [m], required when aim_frac is not None.
+    force_scale   : float [N] – force that corresponds to the maximum arrow length.
+                    Arrow length scales linearly with |F|/force_scale.
+                    If None, a fixed arrow length is used for all non-zero forces.
     """
     save_mode = save_fps is not None
     # ---- Visual style (mirrors visualization_finger_interactive.py) ----
@@ -172,10 +176,10 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
                        ha="center", va="center", fontsize=12)
 
     # ---- Build all artists for the first frame ----
-    th1_0, th2_0, th3_0_val = sol.y[0, 0], sol.y[1, 0], sol.y[2, 0]
-    a1 = th1_0
-    a2 = th1_0 + th2_0
-    a3 = th1_0 + th2_0 + th3_0_val
+    phi1_0, phi2_0, phi3_0 = sol.y[0, 0], sol.y[1, 0], sol.y[2, 0]
+    a1 = phi1_0
+    a2 = phi1_0 + phi2_0
+    a3 = phi1_0 + phi2_0 + phi3_0
 
     P_MCP = base + L1 * np.array([cos(a1), sin(a1)])
     P_PIP = P_MCP + L2 * np.array([cos(a2), sin(a2)])
@@ -205,9 +209,9 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
     arc_pip = _add_arc(P_MCP, np.degrees(a1), np.degrees(a2), arc_r2)
     arc_dip = _add_arc(P_PIP, np.degrees(a2), np.degrees(a3), arc_r3)
 
-    ann_mcp = _annotate(base,  0.0, a1, arc_r1, r"$\theta_{1}$")
-    ann_pip = _annotate(P_MCP, a1,  a2, arc_r2, r"$\theta_{2}$")
-    ann_dip = _annotate(P_PIP, a2,  a3, arc_r3, r"$\theta_{3}$")
+    ann_mcp = _annotate(base,  0.0, a1, arc_r1, r"$\phi_{1}$")
+    ann_pip = _annotate(P_MCP, a1,  a2, arc_r2, r"$\phi_{2}$")
+    ann_dip = _annotate(P_PIP, a2,  a3, arc_r3, r"$\phi_{3}$")
 
     time_text = ax.text(0.02, 0.96, "", transform=ax.transAxes,
                         fontsize=11, va="top")
@@ -265,10 +269,14 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
         """Create a FancyArrow for a link force (returns None if mag is ~zero)."""
         if abs(mag_val) < 1e-12:
             return None
-        dx = _lf_arrow_len * cos(force_angle)
-        dy = _lf_arrow_len * sin(force_angle)
-        hw = _lf_arrow_len * 0.20
-        hl = _lf_arrow_len * 0.28
+        if force_scale is not None and force_scale > 0:
+            scaled_len = _lf_arrow_len * abs(mag_val) / force_scale
+        else:
+            scaled_len = _lf_arrow_len
+        dx = scaled_len * cos(force_angle)
+        dy = scaled_len * sin(force_angle)
+        hw = scaled_len * 0.20
+        hl = scaled_len * 0.28
         return FancyArrow(att_mm[0], att_mm[1], dx, dy,
                           width=hw * 0.3, head_width=hw, head_length=hl,
                           color=color, alpha=0.85, zorder=6,
@@ -340,12 +348,12 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
         frame = int(np.searchsorted(sol.t, sim_t))
         frame = min(frame, sol.y.shape[1] - 1)
 
-        th1 = sol.y[0, frame]
-        th2 = sol.y[1, frame]
-        th3 = sol.y[2, frame]
-        a1  = th1
-        a2  = th1 + th2
-        a3  = th1 + th2 + th3
+        phi1 = sol.y[0, frame]
+        phi2 = sol.y[1, frame]
+        phi3 = sol.y[2, frame]
+        a1   = phi1
+        a2   = phi1 + phi2
+        a3   = phi1 + phi2 + phi3
 
         MCP = base + L1 * np.array([cos(a1), sin(a1)])
         PIP = MCP  + L2 * np.array([cos(a2), sin(a2)])

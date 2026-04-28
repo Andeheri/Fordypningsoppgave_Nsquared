@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 from scipy.linalg import solve_continuous_lyapunov
 from tqdm import tqdm
+from types import SimpleNamespace
 from visualization_finger_simulation_v2 import animate_finger_simulation, plot_simulation_angles, _move_to_secondary
 from dynamics import *
 
@@ -194,14 +195,6 @@ def _finger_cable_length(phi_1, phi_2):
 # Cable-length constant: r_spindle*theta + L_finger(phi) = C_cable (conserved)
 C_cable = r_spindle * 0.0 + _finger_cable_length(phi1_0, phi2_0)
 
-should_save_animation = True  # Set to True to save the animation as a GIF file
-should_show_plots = False  # Set to False to skip showing plots (useful when only saving the animation)
-note = "prior_to_motor_integration"  # A note to include in the filename for clarity
-save_folder = "adaptive_control/figures/with_finger_dynamics"
-
-filename_angles    = f"{save_folder}/finger_simulation_angles_{note}.png"  # Filename for the saved angles plot
-filename_animation = f"{save_folder}/finger_simulation_{note}.gif"         # Filename for the saved animation
-
 
 def current_clamp(i_cmd):
     return float(np.clip(i_cmd, -Ia_stall, Ia_stall))
@@ -237,7 +230,6 @@ def closed_loop_dynamics(t, z):
     r_t = r(t)
     e   = x - xm
 
-    # MRAC outer loop: desired current command
     i_cmd = control_law(x, r_t, K, L)
 
     # ---- Cable Jacobian: r_spindle * omega = J_cable @ q_dot ----
@@ -300,6 +292,13 @@ def closed_loop_dynamics(t, z):
                + 2.0 * alpha_B * g_vel
                + beta_B**2   * g_pos) / H
 
+    # Unilateral constraint: cable can only pull (T_cable >= 0).
+    # When T_cable < 0 the motor is paying out cable, the cable goes slack,
+    # and the two systems decouple.  g_pos then drifts negative (tracking the
+    # accumulated slack); the constraint only re-engages once the motor has
+    # reeled in all of the excess cable (g_pos → 0) and T_cable > 0 again.
+    T_cable = max(0.0, T_cable)
+
     # ---- Finger EOM (cable enters as J_cable * T_cable) ----
     q_ddot = M_inv @ (tau_passive + J_cable * T_cable)
 
@@ -336,8 +335,10 @@ def main():
         0.0, 0.0, 0.0            # finger initial angular velocities
     ]
 
-    save_folder = "adaptive_control/figures"
-    filename = "mrac_with_finger_dynamics"
+    save_folder = "adaptive_control/figures/with_finger_dynamics"
+    filename = "mrac_with_finger_dynamics_test_decoupling"
+    should_save_animation = True  # Set to True to save the animation as a GIF file
+    should_show_plots = False  # Set to False to skip showing plots (useful when only saving the animation)
     os.makedirs(save_folder, exist_ok=True)
 
     with tqdm(total=T, desc="Simulating", unit="s", dynamic_ncols=True) as pbar:
@@ -378,7 +379,7 @@ def main():
     i_cmd  = np.clip(-(K1 * x_all[0] + K2 * x_all[1]) + L * r_all, -Ia_stall, Ia_stall)
 
     # Plot results
-    fig, axes = plt.subplots(3, 1, figsize=(12, 13), sharex=True)
+    fig, axes = plt.subplots(4, 1, figsize=(12, 17), sharex=True)
 
     def setup_axis(ax, ylabel, title=None):
         if title:
@@ -409,12 +410,111 @@ def main():
     axes[2].plot(sol.t, L,  label='L')
     axes[2].legend()
     setup_axis(axes[2], 'Gain', title='Adaptive Gains')
-    axes[2].set_xlabel('Time (s)')
+
+    # Motor current command
+    axes[3].plot(sol.t, i_cmd, label=r'$i_\mathrm{cmd}$')
+    axes[3].axhline( Ia_stall, color='r', linestyle=':', linewidth=1.2, label=r'$\pm I_\mathrm{stall}$')
+    axes[3].axhline(-Ia_stall, color='r', linestyle=':', linewidth=1.2)
+    axes[3].legend()
+    setup_axis(axes[3], 'Current (A)', title='Motor Current Command')
+    axes[3].set_xlabel('Time (s)')
 
     plt.tight_layout()
     plt.savefig(f"{save_folder}/{filename}.png", dpi=300)
 
-    plt.show()
+    # ---- Recompute cable tension at every timestep for animation arrows ----
+    # T_cable is an internal quantity; re-derive it from the saved state so the
+    # animation arrows show the actual constraint force at each frame.
+    T_cable_all = np.zeros(len(sol.t))
+    for _i, _ti in enumerate(sol.t):
+        _s = sol.y[:, _i]
+        _th, _om = _s[0], _s[1]
+        _K_i, _L_i = _s[4:6], _s[6]
+        _p1, _p2, _p3 = _s[7:10]
+        _d1v, _d2v, _d3v = _s[10:13]
+        _icmd = control_law(np.array([_th, _om]), r(_ti), _K_i, _L_i)
+        _a1 = _p1;  _a2 = _p1 + _p2
+        _att1 = np.array([force_s1*cos(_a1) - r_circle1*sin(_a1),
+                          force_s1*sin(_a1) + r_circle1*cos(_a1)])
+        _att2 = np.array([l1*cos(_a1) + force_s2*cos(_a2) - r_circle2*sin(_a2),
+                          l1*sin(_a1) + force_s2*sin(_a2) + r_circle2*cos(_a2)])
+        _tgt1 = np.array([-_force_aim[0] * l0, 0.0])
+        _tgt2 = _force_aim[1] * l1 * np.array([cos(_a1), sin(_a1)])
+        def _un(v): _n = np.linalg.norm(v); return v / _n if _n > 1e-12 else np.zeros(2)
+        _dd1 = _un(_tgt1 - _att1);  _dd2 = _un(_tgt2 - _att2)
+        _J1 = np.array([[-(force_s1*sin(_a1)+r_circle1*cos(_a1)), 0., 0.],
+                        [ force_s1*cos(_a1)-r_circle1*sin(_a1),   0., 0.]])
+        _J2 = np.array([[-(l1*sin(_a1)+force_s2*sin(_a2)+r_circle2*cos(_a2)),
+                          -(force_s2*sin(_a2)+r_circle2*cos(_a2)), 0.],
+                        [ l1*cos(_a1)+force_s2*cos(_a2)-r_circle2*sin(_a2),
+                           force_s2*cos(_a2)-r_circle2*sin(_a2),  0.]])
+        _Jc = wt_frac1*(_dd1@_J1) + wt_frac2*(_dd2@_J2)
+        _Mm  = M(_p1, _p2, _p3)
+        _Cm  = C(_p1, _p2, _p3, _d1v, _d2v, _d3v)
+        _tk  = Tau_K(_p1, _p2, _p3)
+        _tb  = Tau_B(_d1v, _d2v, _d3v)
+        _qd  = np.array([_d1v, _d2v, _d3v])
+        _tp  = -_Cm@_qd - _tk - _tb
+        _Mi  = np.linalg.inv(_Mm)
+        _H   = r_spindle**2/Jm + float(_Jc@_Mi@_Jc)
+        _Lf  = wt_frac1*np.linalg.norm(_tgt1-_att1) + wt_frac2*np.linalg.norm(_tgt2-_att2)
+        _gp  = r_spindle*_th + _Lf - C_cable
+        _gv  = r_spindle*_om - float(_Jc@_qd)
+        T_cable_all[_i] = max(0.0, (r_spindle*(Kt*_icmd - Bm*_om)/Jm
+                                     - float(_Jc@_Mi@_tp)
+                                     + 2.*alpha_B*_gv + beta_B**2*_gp) / _H)
+
+    # Interpolating callables — link force = fraction of cable tension [N]
+    _t_arr = sol.t
+    _F1_cable = wt_frac1 * T_cable_all
+    _F2_cable = wt_frac2 * T_cable_all
+    _lf_mag_anim = (
+        lambda t, s: float(np.interp(t, _t_arr, _F1_cable)),
+        lambda t, s: float(np.interp(t, _t_arr, _F2_cable)),
+        lambda t, s: 0.,
+    )
+    # Maximum per-link force — sets the full-length arrow reference
+    _force_scale = float(np.max(np.abs([_F1_cable, _F2_cable])))
+
+    # ---- Finger animation -----------------------------------------------
+    # Wrap the finger portion of the state so animate_finger_simulation sees
+    # angles at rows 0-2 (as it expects from a standalone finger simulation).
+    sol_finger = SimpleNamespace(
+        t=sol.t,
+        y=sol.y[7:13]   # rows: phi1, phi2, phi3, phi1_dot, phi2_dot, phi3_dot
+    )
+
+    if should_show_plots:
+        _ = animate_finger_simulation(
+            sol_finger, l1, l2, l3,
+            speed=simulation_speed,
+            link_force_s=_force_s,
+            link_force_mag=_lf_mag_anim,
+            link_force_r=_force_r,
+            aim_frac=_force_aim,
+            l0=l0,
+            force_scale=_force_scale,
+        )
+
+    if should_save_animation:
+        anim_filepath = f"{save_folder}/{filename}.gif"
+        print(f"Saving animation to {anim_filepath} ...")
+        anim_save = animate_finger_simulation(
+            sol_finger, l1, l2, l3,
+            speed=simulation_speed, save_fps=30,
+            link_force_s=_force_s,
+            link_force_mag=_lf_mag_anim,
+            link_force_r=_force_r,
+            aim_frac=_force_aim,
+            l0=l0,
+            force_scale=_force_scale,
+        )
+        anim_save.save(anim_filepath, writer='pillow', fps=30, dpi=150)
+        plt.close(anim_save._fig)
+        print("Animation saved.")
+
+    if should_show_plots:
+        plt.show()
 
 if __name__ == "__main__":
     main()
