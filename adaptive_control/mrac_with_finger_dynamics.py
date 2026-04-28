@@ -36,6 +36,7 @@ Jm = 0.093   # kg*m^2
 La = 0.006   # H
 
 r_spindle = 0.01  # m (effective radius of the spindle that the cable winds around)
+should_use_pure_pd_control = True  # Set to True to disable MRAC adaptation and use only a fixed PD controller (for testing)
 
 """
 Reduced 2-state plant:
@@ -97,6 +98,12 @@ L_0 = 1.0
 
 print("K_star =", K_star)
 print("L_star =", L_star)
+
+"""
+No load controller
+"""
+Kp = 13.50
+Kd = 3.12
 
 """
 Adaptive gains
@@ -200,6 +207,11 @@ def control_law(x: np.ndarray, r_val: float, K: np.ndarray, L: float):
     return current_clamp(i_cmd)
 
 
+def no_load_control_law(x: np.ndarray, r_val: float):
+    i_cmd = Kp * (r_val - x[0]) - Kd * x[1]
+    return current_clamp(i_cmd)
+
+
 def closed_loop_dynamics(t, z):
     """
     State:
@@ -224,8 +236,13 @@ def closed_loop_dynamics(t, z):
     x   = np.array([theta, omega])
     r_t = r(t)
     e   = x - xm
-
-    i_cmd = control_law(x, r_t, K, L)
+    if should_use_pure_pd_control:
+        i_cmd = no_load_control_law(x, r_t)
+    else:
+        if r_t > 0:
+            i_cmd = control_law(x, r_t, K, L)
+        else:
+            i_cmd = no_load_control_law(x, r_t)
 
     # ---- Cable Jacobian: r_spindle * omega = J_cable @ q_dot ----
     # J_cable (shape 3,) is the row vector such that the instantaneous cable
@@ -333,11 +350,19 @@ def closed_loop_dynamics(t, z):
 
     # ---- Reference model ----
     dxm = A_m @ xm + B_m.flatten() * r_t
-
-    # ---- MRAC adaptive law ----
-    sigma = (B_m.T @ P @ e.reshape(-1, 1)).item()
-    dK    = Gamma_K @ x * sigma
-    dL    = -gamma_L * r_t * sigma
+    if should_use_pure_pd_control:
+        dK = np.zeros_like(K)
+        dL = 0.0
+    else:
+        if r_t > 0:
+            # ---- MRAC adaptive law ----
+            sigma = (B_m.T @ P @ e.reshape(-1, 1)).item()
+            dK    = Gamma_K @ x * sigma
+            dL    = -gamma_L * r_t * sigma
+        else:
+            # ---- No-load PD control, no adaptation ----
+            dK = np.zeros_like(K)
+            dL = 0.0
 
     return np.hstack(([dtheta, domega], dxm, dK, [dL], q_dot, q_ddot))
 
@@ -361,7 +386,7 @@ def main():
     ]
 
     save_folder = "adaptive_control/figures/with_finger_dynamics"
-    filename = "mrac_with_finger_dynamics_test_decoupling_all_links"
+    filename = "mrac_pure_pd_high_stiffness"  # Base filename for saved figures and animations
     should_save_animation = True  # Set to True to save the animation as a GIF file
     should_show_plots = False  # Set to False to skip showing plots (useful when only saving the animation)
     os.makedirs(save_folder, exist_ok=True)
@@ -401,10 +426,15 @@ def main():
 
     x_all  = sol.y[0:2]
     r_all  = r(sol.t)
-    i_cmd  = np.clip(-(K1 * x_all[0] + K2 * x_all[1]) + L * r_all, -Ia_stall, Ia_stall)
+    if should_use_pure_pd_control:
+        i_cmd  = np.clip(Kp * (r_all - x_all[0]) - Kd * x_all[1], -Ia_stall, Ia_stall)
+    else:
+        i_cmd  = np.clip(-(K1 * x_all[0] + K2 * x_all[1]) + L * r_all, -Ia_stall, Ia_stall)
 
     # Plot results
-    fig, axes = plt.subplots(4, 1, figsize=(12, 17), sharex=True)
+    _n_subplots = 3 if should_use_pure_pd_control else 4
+    _fig_h      = 13 if should_use_pure_pd_control else 17
+    fig, axes = plt.subplots(_n_subplots, 1, figsize=(12, _fig_h), sharex=True)
 
     def setup_axis(ax, ylabel, title=None):
         if title:
@@ -429,20 +459,22 @@ def main():
     axes[1].legend()
     setup_axis(axes[1], 'Relative Angle (rad)', title='Finger Joint Angles')
 
-    # Adaptive gains
-    axes[2].plot(sol.t, K1, label='K1')
-    axes[2].plot(sol.t, K2, label='K2')
-    axes[2].plot(sol.t, L,  label='L')
-    axes[2].legend()
-    setup_axis(axes[2], 'Gain', title='Adaptive Gains')
+    # Adaptive gains (skipped for pure PD mode)
+    if not should_use_pure_pd_control:
+        axes[2].plot(sol.t, K1, label='K1')
+        axes[2].plot(sol.t, K2, label='K2')
+        axes[2].plot(sol.t, L,  label='L')
+        axes[2].legend()
+        setup_axis(axes[2], 'Gain', title='Adaptive Gains')
 
     # Motor current command
-    axes[3].plot(sol.t, i_cmd, label=r'$i_\mathrm{cmd}$')
-    axes[3].axhline( Ia_stall, color='r', linestyle=':', linewidth=1.2, label=r'$\pm I_\mathrm{stall}$')
-    axes[3].axhline(-Ia_stall, color='r', linestyle=':', linewidth=1.2)
-    axes[3].legend()
-    setup_axis(axes[3], 'Current (A)', title='Motor Current Command')
-    axes[3].set_xlabel('Time (s)')
+    _ax_i = 2 if should_use_pure_pd_control else 3
+    axes[_ax_i].plot(sol.t, i_cmd, label=r'$i_\mathrm{cmd}$')
+    axes[_ax_i].axhline( Ia_stall, color='r', linestyle=':', linewidth=1.2, label=r'$\pm I_\mathrm{stall}$')
+    axes[_ax_i].axhline(-Ia_stall, color='r', linestyle=':', linewidth=1.2)
+    axes[_ax_i].legend()
+    setup_axis(axes[_ax_i], 'Current (A)', title='Motor Current Command')
+    axes[_ax_i].set_xlabel('Time (s)')
 
     plt.tight_layout()
     plt.savefig(f"{save_folder}/{filename}.png", dpi=300)

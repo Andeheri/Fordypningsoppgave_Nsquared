@@ -34,12 +34,23 @@ pwm_period      = 1.0 / pwm_frequency
 voltage_turnoff = 1.0             # V – suppress switching at near-zero voltages
 
 Ia_max = Ia_stall  # A (max current magnitude, for clamping)
+should_disable_load = True
+
+# Set to False to skip the PI/PWM inner current loop and feed i_cmd directly
+# to the mechanical plant (ideal current tracking). Speeds up simulation.
+use_pwm_voltage_controller = False
 
 # Unknown mechanical load parameters (used only in the simulated plant)
 J = 0.5
 c = 0.2
 k = 0.5
 theta_eq = pi / 6
+
+if should_disable_load:
+    J = 0.0
+    c = 0.0
+    k = 0.0
+    theta_eq = 0.0
 
 """
 Reduced 2-state plant:
@@ -80,7 +91,7 @@ B_ = np.array([
 Reference model
 Choose desired theta-tracking dynamics here
 """
-omega_n = 5.0
+omega_n = 10.0
 zeta = 1.0
 
 A_m = np.array([
@@ -135,10 +146,26 @@ Reference input
 """
 t0 = 1.0
 r_max = pi / 4
-r = lambda t: r_max * (t > t0)
-r = lambda t: r_max * sin(2 * pi * 0.5 * t)
-# Square wave reference:
-r = lambda t: r_max * (sin(2 * pi * 0.5 * t) > 0).astype(float)
+r_min = 0.0
+ref_frequency = 0.5  # Hz – square-wave cycle frequency
+# r = lambda t: r_max * (sin(2 * pi * 0.5 * t) > 0).astype(float)  # Square wave reference input
+
+# Pre-generate random levels for each half-cycle so r(t) is deterministic
+# within a simulation run. Each half-cycle gets an independent uniform draw
+# from [r_min, r_max].
+_rng = np.random.default_rng(seed=42)
+_T_sim_approx = 100.0  # generous upper bound for pre-allocation (seconds)
+_n_half_cycles = int(np.ceil(_T_sim_approx * ref_frequency * 2)) + 2
+_random_levels = _rng.uniform(r_min, r_max, size=_n_half_cycles)
+
+
+def r(t):
+    """Square wave with a random amplitude drawn per half-cycle."""
+    t = np.asarray(t)
+    half_period = 0.5 / ref_frequency
+    idx = (t // half_period).astype(int)
+    idx = np.clip(idx, 0, _n_half_cycles - 1)
+    return _random_levels[idx]
 
 
 def current_clamp(i_cmd):
@@ -191,18 +218,27 @@ def closed_loop_dynamics(t, z):
     # MRAC outer loop: desired current command
     i_cmd = control_law(x, r_t, K, L)
 
-    # Inner PI current controller → voltage command
-    curr_err = i_cmd - i_a
-    V_ideal  = float(np.clip(Kp_i * curr_err + Ki_i * e_int_curr, -V_supply, V_supply))
-    V        = pwm_voltage(t, V_ideal)
+    if use_pwm_voltage_controller:
+        # Inner PI current controller → voltage command
+        curr_err = i_cmd - i_a
+        V_ideal  = float(np.clip(Kp_i * curr_err + Ki_i * e_int_curr, -V_supply, V_supply))
+        V        = pwm_voltage(t, V_ideal)
 
-    # Mechanical plant (driven by actual current i_a)
+        # Electrical plant
+        di_a        = (V - Ra * i_a - Kb * omega) / La
+        de_int_curr = curr_err
+
+        # Mechanical plant (driven by actual current i_a)
+        i_eff = i_a
+    else:
+        # Ideal current tracking: bypass PI/PWM, use i_cmd directly
+        di_a        = 0.0
+        de_int_curr = 0.0
+        i_eff       = i_cmd
+
+    # Mechanical plant
     dtheta = omega
-    domega = float(A_true[1, 0] * theta + A_true[1, 1] * omega + B_true[1, 0] * i_a + d_true[1])
-
-    # Electrical plant
-    di_a        = (V - Ra * i_a - Kb * omega) / La
-    de_int_curr = curr_err
+    domega = float(A_true[1, 0] * theta + A_true[1, 1] * omega + B_true[1, 0] * i_eff + d_true[1])
 
     # Reference model
     dxm = A_m @ xm + B_m.flatten() * r_t
@@ -219,8 +255,8 @@ if __name__ == "__main__":
     """
     Simulation parameters
     """
-    T = 20.0
-    N = 5000
+    T = 100.0
+    N = 10000
     t_eval = np.linspace(0, T, N)
 
     # [theta, omega, i_a, e_int_curr, theta_m, omega_m, K1, K2, L]
@@ -232,7 +268,7 @@ if __name__ == "__main__":
     ]
 
     save_folder = "adaptive_control/figures"
-    filename = "mrac_ideal_mass_spring_damper_test"
+    filename = "mrac_motor_no_load"
     os.makedirs(save_folder, exist_ok=True)
 
     with tqdm(total=T, desc="Simulating", unit="s", dynamic_ncols=True) as pbar:
@@ -268,6 +304,9 @@ if __name__ == "__main__":
     print(f"K_0 = [{float(K1[-1])}, {float(K2[-1])}]")
     print(f"L_0 = {L[-1]}")
 
+    print("Final controller parameters:")
+    print(f"Kp = {(float(K1[-1]) + L[-1]) / 2:.2f}\nKd = {float(K2[-1]):.2f}")
+
     x_all  = sol.y[0:2]
     r_all  = r(t_eval)
     i_cmd  = np.clip(-(K1 * x_all[0] + K2 * x_all[1]) + L * r_all, -Ia_stall, Ia_stall)
@@ -289,12 +328,19 @@ if __name__ == "__main__":
     setup_axis(axes[0], 'Angle (rad)', title='Angle Tracking')
 
     # Current tracking (inner loop)
-    axes[1].plot(t_eval, i_cmd, '--', label=r'$i_{cmd}$ (MRAC)')
-    axes[1].plot(t_eval, i_a,         label=r'$i_a$ (actual)')
-    axes[1].axhline( Ia_stall, color='gray', linestyle=':', linewidth=0.8)
-    axes[1].axhline(-Ia_stall, color='gray', linestyle=':', linewidth=0.8)
-    axes[1].legend()
-    setup_axis(axes[1], 'Current (A)', title='Current Tracking (PI inner loop)')
+    if use_pwm_voltage_controller:
+        axes[1].plot(t_eval, i_cmd, '--', label=r'$i_{cmd}$ (MRAC)')
+        axes[1].plot(t_eval, i_a,         label=r'$i_a$ (actual)')
+        axes[1].axhline( Ia_stall, color='gray', linestyle=':', linewidth=0.8)
+        axes[1].axhline(-Ia_stall, color='gray', linestyle=':', linewidth=0.8)
+        axes[1].legend()
+        setup_axis(axes[1], 'Current (A)', title='Current Tracking (PI inner loop)')
+    else:
+        axes[1].plot(t_eval, i_cmd, label=r'$i_{cmd}$ (ideal)')
+        axes[1].axhline( Ia_stall, color='gray', linestyle=':', linewidth=0.8)
+        axes[1].axhline(-Ia_stall, color='gray', linestyle=':', linewidth=0.8)
+        axes[1].legend()
+        setup_axis(axes[1], 'Current (A)', title='Current Command (ideal, no PWM)')
 
     # Adaptive gains
     axes[2].plot(t_eval, K1, label='K1')
