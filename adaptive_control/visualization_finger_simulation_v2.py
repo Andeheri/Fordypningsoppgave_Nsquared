@@ -118,7 +118,7 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
     L0 = l0 * 1000.0 if l0 is not None else 0.0
     # Link lengths in mm
     L1, L2, L3  = l1 * 1000, l2 * 1000, l3 * 1000
-    wrist_len   = 0.15 * L1
+    wrist_len   = L0 if L0 > 0 else 0.15 * L1
     ext_len     = 0.25 * L1
     ref_len     = 0.35 * L1
     arc_r1      = 0.25 * L1
@@ -128,11 +128,11 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
 
     base = np.array([0.0, 0.0])
 
-    fig, ax = plt.subplots(figsize=(7, 7))
+    fig, ax = plt.subplots(figsize=(10, 10))
     _move_to_secondary(fig)
     margin = 1.1 * (L1 + L2 + L3)
     ax.set_xlim(-wrist_len - 5, margin)
-    ax.set_ylim(-margin * 0.3, margin)
+    ax.set_ylim(-margin * 0.4, margin)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("x [mm]", fontsize=13)
     ax.set_ylabel("y [mm]", fontsize=13)
