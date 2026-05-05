@@ -36,7 +36,7 @@ Jm = 0.093   # kg*m^2
 La = 0.006   # H
 
 r_spindle = 0.01  # m (effective radius of the spindle that the cable winds around)
-should_use_pure_pd_control = True  # Set to True to disable MRAC adaptation and use only a fixed PD controller (for testing)
+should_use_pure_pd_control = False  # Set to True to disable MRAC adaptation and use only a fixed PD controller (for testing)
 
 """
 Reduced 2-state plant:
@@ -172,6 +172,14 @@ _force_aim = (aim_frac1, aim_frac2, aim_frac3)
 # A value of ~50 damps constraint errors in roughly 1/50 seconds.
 alpha_B = 50.0   # velocity-level correction gain
 beta_B  = 50.0   # position-level correction gain
+
+# ---- Cable friction ------------------------------------------------------
+# Models viscous friction losses in the cable routing (pulleys, guides, etc.).
+# The motor "sees" the full cable tension; the tension *delivered* to the finger
+# is reduced by  F_fric = cable_friction * |v_cable|  where
+# v_cable = r_spindle * |omega| is the cable speed at the spindle.
+# Set to 0.0 to disable (recovers the ideal frictionless model).
+cable_friction = 0.0   # [N·s/m]  viscous cable friction coefficient
 
 def _finger_cable_length(phi_1, phi_2, phi_3=0.0):
     """Geometric cable length on the finger side of the whiffle tree [m].
@@ -341,8 +349,12 @@ def closed_loop_dynamics(t, z):
     # reeled in all of the excess cable (g_pos → 0) and T_cable > 0 again.
     T_cable = max(0.0, T_cable)
 
-    # ---- Finger EOM (cable enters as J_cable * T_cable) ----
-    q_ddot = M_inv @ (tau_passive + J_cable * T_cable)
+    # ---- Cable friction: reduces tension delivered to finger ----
+    v_cable  = r_spindle * abs(omega)            # cable speed at spindle [m/s]
+    T_finger = max(0.0, T_cable - cable_friction * v_cable)  # net tension at attachment [N]
+
+    # ---- Finger EOM (cable enters as J_cable * T_finger) ----
+    q_ddot = M_inv @ (tau_passive + J_cable * T_finger)
 
     # ---- Motor EOM (cable tension loads the spindle) ----
     dtheta = omega
@@ -386,7 +398,7 @@ def main():
     ]
 
     save_folder = "adaptive_control/figures/with_finger_dynamics"
-    filename = "mrac_pure_pd_high_stiffness"  # Base filename for saved figures and animations
+    filename = "mrac_pd_switching_controller_low_stiffness_and_damping"  # Base filename for saved figures and animations
     should_save_animation = True  # Set to True to save the animation as a GIF file
     should_show_plots = False  # Set to False to skip showing plots (useful when only saving the animation)
     os.makedirs(save_folder, exist_ok=True)

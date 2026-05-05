@@ -7,8 +7,8 @@ m1, m2, m3 = 0.02, 0.015, 0.010  # Masses [kg]
 l1, l2, l3 = 0.048, 0.030, 0.024  # Lengths [m]
 r1, r2, r3 = 0.085, 0.085, 0.085  # Radii [m]
 
-k1, k2, k3 = 10.0, 10.0, 10.0  # Spring constants [N*m/rad]
-b1, b2, b3 = 2.0, 2.0, 2.0  # Damping coefficients [N*m*s/rad]
+k1, k2, k3 = 0.1, 0.1, 0.1  # Spring constants [N*m/rad]
+b1, b2, b3 = 0.1, 0.1, 0.1  # Damping coefficients [N*m*s/rad]
 
 Kf = np.diag([k1, k2, k3])  # Spring stiffness matrix
 Bf = np.diag([b1, b2, b3])  # Damping matrix

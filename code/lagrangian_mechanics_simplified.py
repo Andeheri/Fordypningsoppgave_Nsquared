@@ -2,6 +2,7 @@
 import sympy as sp
 import time
 import dill
+import subprocess
 from tqdm import tqdm
 
 """-------------------- Symbols -----------------------"""
@@ -121,7 +122,21 @@ _DOT_DISPLAY_SUBS = {
     θ2_3:     sp.Symbol('θ\u2082\u2083'),      # θ₂₃
     θ1_3:     sp.Symbol('θ\u2081\u2083'),      # θ₁₃
 }
-
+# LaTeX substitutions for clipboard export (uses \varphi)
+_LATEX_DISPLAY_SUBS = {
+    θ1_dot:   sp.Symbol(r'\dot{\varphi}_1'),
+    θ2_dot:   sp.Symbol(r'\dot{\varphi}_2'),
+    θ3_dot:   sp.Symbol(r'\dot{\varphi}_3'),
+    θ1_2_dot: sp.Symbol(r'\dot{\varphi}_{1-2}'),
+    θ2_3_dot: sp.Symbol(r'\dot{\varphi}_{2-3}'),
+    θ1_3_dot: sp.Symbol(r'\dot{\varphi}_{1-3}'),
+    θ1:       sp.Symbol(r'\varphi_1'),
+    θ2:       sp.Symbol(r'\varphi_2'),
+    θ3:       sp.Symbol(r'\varphi_3'),
+    θ1_2:     sp.Symbol(r'\varphi_{1-2}'),
+    θ2_3:     sp.Symbol(r'\varphi_{2-3}'),
+    θ1_3:     sp.Symbol(r'\varphi_{1-3}'),
+}
 
 def dot_pprint(expr, **kwargs):
     """
@@ -312,6 +327,47 @@ def main():
     progress_bar.update(1)
     print("\nCoriolis matrix C(q, q_dot):")
     dot_pprint(C)
+
+    # Copy M and C as LaTeX to clipboard
+    def _apply_latex_subs(mat):
+        if isinstance(mat, sp.MatrixBase):
+            return mat.applyfunc(lambda e: e.subs(_LATEX_DISPLAY_SUBS))
+        return mat.subs(_LATEX_DISPLAY_SUBS)
+
+    import re as _re
+    def _compact_trig(latex_str):
+        # Compact angle sums (longest first to avoid partial matches)
+        latex_str = latex_str.replace(r'\varphi_{1} + \varphi_{2} + \varphi_{3}', r'\varphi_{1-3}')
+        latex_str = latex_str.replace(r'\varphi_{1} + \varphi_{2}', r'\varphi_{1-2}')
+        latex_str = latex_str.replace(r'\varphi_{2} + \varphi_{3}', r'\varphi_{2-3}')
+        # Compact derivative sums
+        latex_str = latex_str.replace(r'\dot{\varphi}_{1} + \dot{\varphi}_{2} + \dot{\varphi}_{3}', r'\dot{\varphi}_{1-3}')
+        latex_str = latex_str.replace(r'\dot{\varphi}_{1} + \dot{\varphi}_{2}', r'\dot{\varphi}_{1-2}')
+        latex_str = latex_str.replace(r'\dot{\varphi}_{2} + \dot{\varphi}_{3}', r'\dot{\varphi}_{2-3}')
+        def _sub(m):
+            short = 'c' if m.group(1) == 'cos' else 's'
+            return f'{short}_{{{m.group(2).strip()}}}'
+        # Handle \cos{\left(arg\right)} form (SymPy default)
+        latex_str = _re.sub(
+            r'\\(cos|sin)\{\\left\((.*?)\\right\)\}',
+            _sub, latex_str, flags=_re.DOTALL
+        )
+        # Handle \cos{arg} form (no \left/\right)
+        latex_str = _re.sub(r'\\(cos|sin)\{([^{}]+)\}', _sub, latex_str)
+        return latex_str
+
+    def _factor_half(latex_str):
+        """Wrap every entry of a matrix LaTeX string with \\frac{1}{2}(...)."""
+        return _re.sub(r'((?:[^&\\]|\\(?!\\))+)', lambda m: m.group(0) if m.group(0).strip() in ('', '&', r'\\') else m.group(0), latex_str)
+
+    latex_M = _compact_trig(sp.latex(_apply_latex_subs(M)))
+    # Factor 1/2 from C symbolically before converting to LaTeX
+    C_half = sp.Rational(2) * _apply_latex_subs(C)
+    latex_C_inner = _compact_trig(sp.latex(C_half))
+    latex_C = r'\frac{1}{2}' + latex_C_inner
+    clipboard_text = f"M(q) =\n{latex_M}\n\nC(q, \\dot{{q}}) =\n{latex_C}"
+    subprocess.run('clip', input=clipboard_text.encode('utf-8'), check=True)
+    print("\nLaTeX of M and C copied to clipboard.")
 
     # Save M, C and p-values to a pickle file
     p_defs = [(ps._seen[str(expr)], expr) for expr in ps._const_exprs]
