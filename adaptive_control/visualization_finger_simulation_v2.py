@@ -226,14 +226,21 @@ def animate_finger_simulation(sol, l1, l2, l3, speed=1.0, save_fps=None,
     lf_aim_scatters    = []                   # dots on the target link
 
     def _target_points_mm(a1, a2, a3):
-        """Return the three aim-target points in mm (on the link below each force)."""
+        """Return the three aim-target points in mm (on the link below each force).
+        Each target is offset outward (90° CW from the link direction, i.e. dorsal side)
+        by aim_back_mm so the arrow anchor lies outside the finger cross-section."""
+        aim_back_mm = 8.0   # perpendicular offset [mm] toward dorsal side
         MCP_loc = base + L1 * np.array([cos(a1), sin(a1)])
-        # target1: along metacarpal (pointing left at angle pi)
-        tgt1 = np.array([-aim_frac[0] * L0, 0.0])
-        # target2: along link 1
-        tgt2 = aim_frac[1] * L1 * np.array([cos(a1), sin(a1)])
-        # target3: along link 2, starting from MCP
-        tgt3 = MCP_loc + aim_frac[2] * L2 * np.array([cos(a2), sin(a2)])
+        # Perpendicular unit vectors (90° CW from each link axis = [sin, -cos])
+        perp_wrist = np.array([0.0, -1.0])           # metacarpal points in -x, CW perp = [0,-1]
+        perp1      = np.array([sin(a1), -cos(a1)])   # link 1 CW perp
+        perp2      = np.array([sin(a2), -cos(a2)])   # link 2 CW perp
+        # target1: along metacarpal + dorsal offset
+        tgt1 = np.array([-aim_frac[0] * L0, 0.0]) + aim_back_mm * perp_wrist
+        # target2: along link 1 + dorsal offset
+        tgt2 = aim_frac[1] * L1 * np.array([cos(a1), sin(a1)]) + aim_back_mm * perp1
+        # target3: along link 2, starting from MCP + dorsal offset
+        tgt3 = MCP_loc + aim_frac[2] * L2 * np.array([cos(a2), sin(a2)]) + aim_back_mm * perp2
         return tgt1, tgt2, tgt3
 
     def _midpoints_mm(a1, a2, a3):

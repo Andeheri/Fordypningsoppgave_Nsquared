@@ -3,17 +3,27 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
+# plt.rcParams.update({
+#     "text.usetex": True,
+#     "font.family": "serif",
+#     "font.serif": ["Latin Modern Roman"],
+#     "text.latex.preamble": r"\usepackage{lmodern} \usepackage[T1]{fontenc}",
+# })
+
 """
 Simulation parameters
 """
-T  = 6*10**-3       # Total simulation time (s)
+T  = 8*10**-3       # Total simulation time (s)
 fs = 100_000   # Sample rate (Hz)  – fixed step, fully transparent
 dt = 1.0 / fs
 N  = int(T * fs) + 1
 t_eval = np.linspace(0, T, N)
 
+fc = 10_000     # Controller update rate (Hz)
+dt_c = 1.0 / fc
+
 theta_0 = 0.0  # Initial angle (rad)
-omega_0 = 4.0  # Initial angular velocity (rad/s)
+omega_0 = 5.0  # Initial angular velocity (rad/s)
 i_a_0 = 0.0    # Initial armature current (A)
 
 """
@@ -27,7 +37,7 @@ Kt = 0.7274 # Nm/A (Torque constant)
 Ra = 0.6    # Ω (Armature resistance)
 La = 0.006  # H (Armature inductance)
 
-V_sat = 12.0   # V (Supply voltage / saturation limit)
+E_a_sat = 12.0   # V (Supply voltage / saturation limit)
 pwm_frequency = 1000.0  # Hz (PWM frequency)
 pwm_period = 1.0 / pwm_frequency  # s (PWM period)
 
@@ -39,20 +49,16 @@ Control law (2-DOF structure):
     - Kp2*ω - Kd*(Kt*i_a - Bm*ω)/Jm [PD feedback on output]
 """
 
-zeta = 0.5  # Damping ratio for PD feedback (zeta=1 → critical damping)
-wn = 27  # Natural frequency for PD feedback (rad/s) – higher → faster response but more noise sensitivity
-
-Kp = 2 * zeta * wn
-Ki = wn**2
-
-# Kp = 20
-# Ki = 800
+Kp = 90
+Ki = 0
 
 print(f"Kp = {Kp:.2f}, Ki = {Ki:.2f}")
 should_disable_feed_forward = False
 should_disable_noise = False
+should_disable_filter = True
 
 t0 = 2*10**-3
+t1 = 3*10**-3
 r_max = 2.0
 
 # Measurement noise standard deviations (set to 0 to disable)
@@ -64,11 +70,11 @@ if should_disable_noise:
 
 # ─── One Euro Filter parameters (applied to control voltage) ─────────────────
 oef_min_cutoff = 100.0   # Hz  – lower → smoother but more lag
-oef_beta       = 5.0     # Hz/(V/s) – higher → less lag during fast changes
+oef_beta       = 20.0     # Hz/(V/s) – higher → less lag during fast changes
 oef_dcutoff    = 1.0     # Hz  – derivative low-pass cutoff
 
-r = lambda t: r_max * (t > t0)  # Step reference input (1 rad)
-
+r = lambda t: r_max * ((t > t0) & (t < t1)) - r_max * (t >= t1)  # Step reference input
+r = lambda t: r_max * (t > t0) 
 
 """
 System dynamics
@@ -82,14 +88,14 @@ State-space realisation  x = [θ, ω, i_a]:
 
 
 def voltage_clamp(V):
-    return np.clip(V, -V_sat, V_sat)
+    return np.clip(V, -E_a_sat, E_a_sat)
 
 
 def control_law(i_a, omega, e_int, t):
-    r_t = r(t)
-    V = Kp * (r_t - i_a) + Ki * e_int
+    r_t = r(t) * (2 - Kp / (Ra + Kp))
+    V = 1 * (Kp * (r_t - i_a) + Ki * e_int)
     if not should_disable_feed_forward:
-        V += Kb * omega + Ra * i_a
+        V += Kb * omega
     return voltage_clamp(V)
 
 
@@ -148,14 +154,20 @@ if __name__ == "__main__":
     # Noisy measurements seen by the controller
     omega_meas_arr = np.zeros(N)
     i_a_meas_arr   = np.zeros(N)
-    V_desired   = np.zeros(N)   # unclamped controller output
-    V_applied   = np.zeros(N)   # clamped, before filter
-    V_filtered  = np.zeros(N)   # after One Euro Filter
+    E_a_desired   = np.zeros(N)   # unclamped controller output
+    E_a_applied   = np.zeros(N)   # clamped, before filter
+    E_a_filtered  = np.zeros(N)   # after One Euro Filter
 
     x          = np.array([theta_0, omega_0, i_a_0])
     e_int      = 0.0
-    rng        = np.random.default_rng(seed=52)
-    oef_V      = OneEuroFilter(dt, min_cutoff=oef_min_cutoff, beta=oef_beta, dcutoff=oef_dcutoff)
+    rng        = np.random.default_rng(seed=1)
+    oef_V      = OneEuroFilter(dt_c, min_cutoff=oef_min_cutoff, beta=oef_beta, dcutoff=oef_dcutoff)
+
+    # Controller state – held constant between controller updates
+    next_ctrl_t = 0.0          # time of next allowed controller update
+    E_a_des  = 0.0
+    E_a_app  = 0.0
+    E_a_filt = 0.0
 
     for i in tqdm(range(N)):
         t = t_eval[i]
@@ -165,10 +177,12 @@ if __name__ == "__main__":
         i_a_meas   = i_a_true   + rng.normal(0.0, noise_std_Ia)
         omega_meas = omega_true + rng.normal(0.0, noise_std_omega)
 
-        # Controller evaluated at noisy measurements
-        V_des  = Kp * (r(t) - i_a_meas) + Ki * e_int + (Kb * omega_meas if not should_disable_feed_forward else 0.0)
-        V_app  = voltage_clamp(V_des)          # clamped, before filter
-        V_filt = oef_V(V_app)                  # One Euro filtered voltage
+        # Controller fires only at fc Hz; voltage is held between updates
+        if t >= next_ctrl_t - 1e-12:
+            E_a_des  = control_law(i_a_meas, omega_meas, e_int, t)  # unclamped control output
+            E_a_app  = voltage_clamp(E_a_des)          # clamped, before filter
+            E_a_filt = E_a_app if should_disable_filter else oef_V(E_a_app)  # One Euro filtered voltage
+            next_ctrl_t += dt_c
 
         # Save true states
         theta_arr[i] = x[0]
@@ -178,16 +192,20 @@ if __name__ == "__main__":
         # Save noisy measurements and voltages
         omega_meas_arr[i] = omega_meas
         i_a_meas_arr[i]   = i_a_meas
-        V_desired[i]  = V_des
-        V_applied[i]  = V_app
-        V_filtered[i] = V_filt
+        E_a_desired[i]  = E_a_des
+        E_a_applied[i]  = E_a_app
+        E_a_filtered[i] = E_a_filt
 
         if i < N - 1:
             # Integrate error using noisy measurement (forward Euler)
             e_int += (r(t) - i_a_meas) * dt
-            x = rk4_step(x, V_filt, dt)   # motor sees filtered voltage
+            x = rk4_step(x, E_a_filt, dt)   # motor sees filtered voltage
 
     r_vals = r(t_eval)
+
+    di_a_dt = np.diff(i_a_arr) / dt
+    print(f"Max rate of change in true current: {np.max(np.abs(di_a_dt)):.2f} A/s")
+
     t_eval = t_eval * 1000
 
     TITLE_SIZE  = 30
@@ -198,7 +216,7 @@ if __name__ == "__main__":
     LINE_NOISE_WIDTH = 0.8
 
     fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True, gridspec_kw={'height_ratios': [2, 1, 1]})
-    fig.suptitle('Current control - PI + FF', fontsize=TITLE_SIZE)
+    fig.suptitle('Current control - P + FF', fontsize=TITLE_SIZE)
 
     axes[0].plot(t_eval, r_vals, 'r--', linewidth=LINE_WIDTH, label='Reference [A]')
     axes[0].plot(t_eval, i_a_meas_arr, color='tab:orange', linewidth=0.8, label=r'$I_a$ measured')
@@ -209,11 +227,12 @@ if __name__ == "__main__":
     axes[0].grid()
 
     # axes[1].plot(t_eval, V_desired, '--', label=r'$V_\mathrm{desired}$ (unclamped)')
-    axes[1].axhline( V_sat, color='red', linestyle='--', linewidth=LINE_WIDTH, label=r'$V_\mathrm{sat}$')
-    axes[1].axhline(-V_sat, color='red', linestyle='--', linewidth=LINE_WIDTH)
-    axes[1].plot(t_eval, V_applied,  color='tab:gray',   linewidth=LINE_NOISE_WIDTH, alpha=0.6, label=r'$V$ raw')
-    axes[1].plot(t_eval, V_filtered, color='tab:orange', linewidth=LINE_WIDTH,                  label=r'$V$ filtered (1€)')
-    axes[1].set_ylabel('Voltage [V]', fontsize=LABEL_SIZE)
+    axes[1].axhline( E_a_sat, color='red', linestyle='--', linewidth=LINE_WIDTH, label=r'$E_{a,\mathrm{sat}}=\pm12V$')
+    axes[1].axhline(-E_a_sat, color='red', linestyle='--', linewidth=LINE_WIDTH)
+    axes[1].plot(t_eval, E_a_applied,  color='tab:orange', linewidth=LINE_WIDTH, label=r'$E_a$')
+    if not should_disable_filter:
+        axes[1].plot(t_eval, E_a_filtered, color='tab:blue', linewidth=LINE_WIDTH, label=r'$E_a$ filtered (1€)')
+    axes[1].set_ylabel(r'$E_a$ [V]', fontsize=LABEL_SIZE)
     axes[1].tick_params(axis='both', labelsize=TICK_SIZE)
     axes[1].legend(fontsize=LEGEND_SIZE, loc='lower right')
     axes[1].grid()
@@ -227,7 +246,5 @@ if __name__ == "__main__":
     axes[2].grid()
 
     plt.tight_layout()
-    plt.savefig('motor_current_control_feed_forward_PI.png')
-    plt.savefig(r'C:\Users\Anders\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures\Adaptive_Controller\motor_current_control_feed_forward_PI.png')
-
-
+    plt.savefig(r'C:\Users\Anders\OneDrive - NTNU\Fordypningsoppgave - Nsquared\finger_dynamics\Fordypningsoppgave_Nsquared\adaptive_control\figures\motor_current_control_feed_forward_PI.pdf', bbox_inches='tight')
+    plt.savefig(r'C:\Users\Anders\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures\Adaptive_Controller\motor_current_control_feed_forward_PI.pdf', bbox_inches='tight')

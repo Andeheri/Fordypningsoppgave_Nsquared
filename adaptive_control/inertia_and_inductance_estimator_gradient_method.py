@@ -6,6 +6,13 @@ import matplotlib.pyplot as plt
 import os
 from tqdm import tqdm
 
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    "font.serif": ["Latin Modern Roman"],
+    "text.latex.preamble": r"\usepackage{lmodern} \usepackage[T1]{fontenc}",
+})
+
 # ─── Motor parameters (Pololu 25D, 12 V) ─────────────────────────────────────
 V_supply          = 12.0
 pwm_frequency     = 1000.0           # Hz
@@ -59,8 +66,9 @@ La_est_0    = 0.001   # initial estimate [H]
 T      = 0.3
 t_eval = np.linspace(0, T, 10_000)
 
-save_folder = "adaptive_control/figures"
-filename    = "inertia_and_inductance_estimator_gradient_results.png"
+save_folder   = "adaptive_control/figures"
+filename      = "inertia_and_inductance_estimator_gradient_results.png"
+filename_pdf  = "inertia_and_inductance_estimator_gradient_results.pdf"
 
 # ─── Measurement noise ────────────────────────────────────────────────────────
 MEASUREMENT_NOISE = False    # toggle on/off
@@ -263,11 +271,29 @@ if __name__ == "__main__":
     ax_jm.plot(t_ms, Jm_est_sol * 1e3,  color='tab:blue',   label=r'$\hat{J}_m(t)$',  linewidth=LINE_WIDTH)
     # ax_jm.axhline(Jm, color='tab:blue',   linestyle='--',     label=rf'$J_m$ = {Jm:.4f} kg·m²', linewidth=LINE_WIDTH)
 
+    # Scale axes so both targets land at the same vertical fraction (they align),
+    # but initial estimates land at different fractions (visual offset at t=0).
+    f_target  = 0.78   # fraction of axis height where both targets sit
+    f_la_init = 0.20   # fraction for La initial value  (appears higher)
+    f_jm_init = 0.09   # fraction for Jm initial value  (appears lower)
+    La_t, La_i = La * 1e3, La_est_0 * 1e3
+    Jm_t, Jm_i = Jm * 1e3, Jm_est_0 * 1e3
+    range_la = (La_t - La_i) / (f_target - f_la_init)
+    lo_la = La_i - f_la_init * range_la
+    range_jm = (Jm_t - Jm_i) / (f_target - f_jm_init)
+    lo_jm = Jm_i - f_jm_init * range_jm
+    ax_la.set_ylim(lo_la, lo_la + range_la)
+    ax_jm.set_ylim(lo_jm, lo_jm + range_jm)
+
+    # Double La tick density relative to default (matplotlib uses ~5 ticks by default)
+    import matplotlib.ticker as mticker
+    ax_la.yaxis.set_major_locator(mticker.MaxNLocator(nbins=10))
+
     lines_jm, labels_jm = ax_jm.get_legend_handles_labels()
     lines_la, labels_la = ax_la.get_legend_handles_labels()
     ax_jm.legend(lines_la + lines_jm, labels_la + labels_jm, fontsize=LEGEND_SIZE, loc='lower right')
 
-    setup_axis(ax_jm, r'Inertia [mkg·m$^2$]', color='tab:blue', title='Rotor Inertia & Armature Inductance Estimates')
+    setup_axis(ax_jm, r'Inertia [mkg·m$^2$]', color='tab:blue', title=r'Rotor Inertia \& Armature Inductance Estimates')
     ax_jm.grid(False)
     ax_la.grid(True)
     ax_la.set_ylabel('Inductance [mH]', color='tab:orange', fontsize=LABEL_SIZE)
@@ -306,5 +332,7 @@ if __name__ == "__main__":
     plt.tight_layout()
     os.makedirs(save_folder, exist_ok=True)
     plt.savefig(f"{save_folder}/{filename}", dpi=150)
+    plt.savefig(f"{save_folder}/{filename_pdf}", bbox_inches='tight')
     plt.savefig(fr"C:\Users\Anders\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures\Modelling\{filename}", dpi=150)
+    plt.savefig(fr"C:\Users\Anders\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures\Modelling\{filename_pdf}", bbox_inches='tight')
     
