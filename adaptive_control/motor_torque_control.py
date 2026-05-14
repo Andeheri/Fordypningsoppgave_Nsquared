@@ -2,6 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from motor_parameters import *
 
 plt.rcParams.update({
     "text.usetex": True,
@@ -13,8 +14,8 @@ plt.rcParams.update({
 """
 Simulation parameters
 """
-T      = 25e-3    # Total simulation time (s)
-t_wall = 10e-3    # Time at which motor hits the wall (s)
+T      = 10e-3    # Total simulation time (s)
+t_wall = 5e-3    # Time at which motor hits the wall (s)
 fs     = 100_000  # Sample rate (Hz) – fixed step
 dt     = 1.0 / fs
 N      = int(T * fs) + 1
@@ -25,9 +26,9 @@ should_show_plot        = False
 should_cover_whole_page = False
 
 V_spinup = 3.0   # V   – open-loop voltage during free-spin phase
-r_tau    = 3.0   # N·m – reference torque to exert on the wall
+r_tau    = 1.5   # N·m – reference torque to exert on the wall
 
-fc   = 1_000         # Controller update rate (Hz)
+fc   = 5_000         # Controller update rate (Hz)
 dt_c = 1.0 / fc
 print(f"Controller update period: {dt_c*1000:.2f} ms")
 
@@ -36,19 +37,12 @@ omega_0 = 0.0  # Initial angular velocity (rad/s)
 i_a_0   = 0.0  # Initial armature current (A)
 
 filename    = f"motor_torque_control_P{'_noise' if not should_disable_noise else ''}_Ts_{dt_c*1000:.1f}ms"
-base_folder = r"C:\Users\ahe02\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures"  # Stasjonær-PC
 base_folder = r"C:\Users\Anders\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures"  # Laptop
+base_folder = r"C:\Users\ahe02\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures"  # Stasjonær-PC
 
 """
 Define motor parameters
 """
-
-Jm = 0.093   # kg·m² (Rotor moment of inertia)
-Bm = 0.008   # N·m·s (Rotor friction coefficient)
-Kb = 0.6     # V·s/rad (Back EMF constant)
-Kt = 0.7274  # N·m/A (Torque constant)
-Ra = 0.6     # Ω (Armature resistance)
-La = 0.006   # H (Armature inductance)
 
 E_a_sat = 12.0  # V (Supply voltage / saturation limit)
 
@@ -144,7 +138,8 @@ if __name__ == "__main__":
                 x[0] = theta_wall  # enforce locked position
                 x[1] = 0.0         # enforce zero velocity
 
-    tau_ref_vals = np.where(t_eval >= t_wall, r_tau, np.nan)
+    tau_ref_vals  = np.where(t_eval >= t_wall, r_tau, np.nan)
+    tau_meas_wall = np.where(t_eval >= t_wall, Kt * i_a_meas_arr, np.nan)
     t_eval_ms    = t_eval * 1000
     t_wall_ms    = t_wall * 1000
 
@@ -158,7 +153,7 @@ if __name__ == "__main__":
         TITLE_SIZE  = 42
         LABEL_SIZE  = 36
         TICK_SIZE   = 34
-        LEGEND_SIZE = 28
+        LEGEND_SIZE = 24
         LINE_WIDTH  = 4
 
     fig, axes = plt.subplots(3, 1, figsize=(12, int(10/4*5.5)), sharex=True, gridspec_kw={'height_ratios': [2, 2, 1.5]})
@@ -168,11 +163,15 @@ if __name__ == "__main__":
         ax.axvline(t_wall_ms, color='gray', linestyle=':', linewidth=0.8*LINE_WIDTH, label=r'Wall contact')
 
     axes[0].plot(t_eval_ms, tau_ref_vals, 'r--', linewidth=0.7*LINE_WIDTH, label=r'$\tau_\mathrm{ref}$')
+    axes[0].plot(t_eval_ms, tau_meas_wall, color='tab:orange', linewidth=LINE_WIDTH, label=r'$\tau[k] = K_t I_a[k]$')
     axes[0].plot(t_eval_ms, tau_arr, color='tab:blue', linewidth=LINE_WIDTH, label=r'$\tau(t) = K_t I_a(t)$')
     axes[0].set_ylabel(r'Torque [N$\cdot$m]', fontsize=LABEL_SIZE)
     axes[0].tick_params(axis='both', labelsize=TICK_SIZE)
     axes[0].legend(fontsize=LEGEND_SIZE, loc='lower right')
     axes[0].grid()
+    ax0_current = axes[0].secondary_yaxis('right', functions=(lambda tau: tau / Kt, lambda I: I * Kt))
+    ax0_current.set_ylabel(r'Current [A]', fontsize=LABEL_SIZE)
+    ax0_current.tick_params(axis='y', labelsize=TICK_SIZE)
 
     axes[1].axhline( E_a_sat, color='red', linestyle='--', linewidth=0.7*LINE_WIDTH, label=r'$E_{a,\mathrm{sat}}=\pm12\,\mathrm{V}$')
     axes[1].axhline(-E_a_sat, color='red', linestyle='--', linewidth=0.7*LINE_WIDTH)

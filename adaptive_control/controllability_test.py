@@ -37,18 +37,16 @@ Kb, Ra, La, Kt = sp.symbols('Kb Ra La Kt', real=True, positive=True)
 State-space realisation of system dynamics (for simulation):
 """
 A = sp.Matrix([
-    [0, 1, 0],
-    [-k/(Jm + J), - (Bm + c)/(Jm + J), Kt/(Jm + J)],
-    [0, -Kb/La, -Ra/La]
+    [0, 1],
+    [-k/(Jm + J), - (Bm + c)/(Jm + J)]
 ])
 
 B = sp.Matrix([
     [0],
-    [0],
-    [1/La]
+    [Kt/(Jm + J)]
 ])
 
-controllability_matrix = sp.Matrix.hstack(B, A @ B, A @ A @ B)
+controllability_matrix = sp.Matrix.hstack(B, A @ B)
 controllability_matrix = controllability_matrix.applyfunc(lambda x: sp.simplify(x))
 rank_of_controllability_matrix = controllability_matrix.rank()
 print("Controllability matrix:")

@@ -26,9 +26,9 @@ should_cover_whole_page = False
 
 t0 = 2*10**-3
 t1 = 3*10**-3
-r_max = 3.0
+r_max = 1.0
 
-fc = 1_000   # Controller update rate (Hz)
+fc = 5_000   # Controller update rate (Hz)
 dt_c = 1.0 / fc
 print(f"Controller update period: {dt_c*1000:.2f} ms")
 
@@ -37,19 +37,19 @@ omega_0 = 0.0  # Initial angular velocity (rad/s)
 i_a_0 = 0.0    # Initial armature current (A)
 
 filename = f"motor_current_control_feed_forward_P{'_FF' if not should_disable_feed_forward else ''}{'_noise' if not should_disable_noise else ''}_Ts_{dt_c*1000:.1f}ms"
-base_folder = r"C:\Users\ahe02\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures"  # Stasjonær-PC
 base_folder = r"C:\Users\Anders\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures"  # Laptop
+base_folder = r"C:\Users\ahe02\OneDrive - NTNU\Fordypningsoppgave - Nsquared\specialization_project\Thesis\Figures"  # Stasjonær-PC
 
 """
 Define motor parameters
 """
 
-Jm = 0.093  # kg*m^2 (Rotor moment of inertia)
-Bm = 0.008  # N*m*s (Rotor friction coefficient)
-Kb = 0.6    # V*s/rad (Back EMF constant)
-Kt = 0.7274 # Nm/A (Torque constant)
-Ra = 0.6    # Ω (Armature resistance)
-La = 0.006  # H (Armature inductance)
+Jm = 5.0e-4
+Bm = 6.47e-3   # N·m·s (Rotor friction coefficient)
+Kb = 0.845     # V·s/rad (Back EMF constant)
+Kt = 0.44      # N·m/A (Torque constant)
+Ra = 2.44      # Ω (Armature resistance)
+La = 0.006     # H (Armature inductance)
 
 E_a_sat = 12.0   # V (Supply voltage / saturation limit)
 pwm_frequency = 1000.0  # Hz (PWM frequency)
@@ -229,6 +229,6 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     plt.savefig(fr'adaptive_control\figures\{filename}.pdf', bbox_inches='tight')
-    plt.savefig(fr'{base_folder}\Adaptive_Controller\{filename}.pdf', bbox_inches='tight')
+    plt.savefig(fr'{base_folder}\Controller_design\{filename}.pdf', bbox_inches='tight')
     if should_show_plot:
         plt.show()
